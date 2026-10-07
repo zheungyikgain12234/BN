@@ -16,9 +16,8 @@ class DomainSearchScreen extends StatefulWidget {
 }
 
 class _DomainSearchScreenState extends State<DomainSearchScreen> {
-  // Local proxy (run: node tools/stackcp_proxy.js) that strips X-Frame-Options from stackcp.com.
   // Override at build time: flutter build web --dart-define=PANEL_URL=https://cp.yourdomain.com/
-  static const _panelUrl = String.fromEnvironment('PANEL_URL', defaultValue: 'https://stackcp.zackloh.dev/');
+  static const _panelUrl = String.fromEnvironment('PANEL_URL', defaultValue: 'https://cp.biznesthub.net/domain-search');
   static const _viewType = 'stackcp-domain-frame';
   static bool _registered = false;
 

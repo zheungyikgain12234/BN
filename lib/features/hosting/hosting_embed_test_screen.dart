@@ -16,7 +16,7 @@ class HostingEmbedTestScreen extends StatefulWidget {
 }
 
 class _HostingEmbedTestScreenState extends State<HostingEmbedTestScreen> {
-  final _url = TextEditingController(text: 'https://stackcp.zackloh.dev/');
+  final _url = TextEditingController(text: 'https://cp.biznesthub.net/domain-search');
   String? _viewType;
   int _counter = 0;
 
