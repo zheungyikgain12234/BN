@@ -215,7 +215,13 @@ class _TopBar extends StatelessWidget {
                 ]),
               ),
             ),
-          const SizedBox(width: 8),
+          // Lives in the bar itself: dropdown items overlapping the embedded panel iframe can't receive clicks on web.
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout, size: 22, color: C.onSurfaceVariant),
+            onPressed: authRepo.signOut,
+          ),
+          const SizedBox(width: 4),
           PopupMenuButton<String>(
             tooltip: 'Account',
             offset: const Offset(0, 44),

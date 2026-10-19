@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config.dart';
 import 'models.dart';
+import 'stackcp_sso.dart';
 
 SupabaseClient get sb => Supabase.instance.client;
 
@@ -36,6 +37,18 @@ class AuthRepository {
   Future<void> signIn(String email, String password) =>
       sb.auth.signInWithPassword(email: email.trim(), password: password);
 
+  /// Creates the account. Returns true when a session was started right away; false when the
+  /// project requires email confirmation first.
+  Future<bool> signUp({required String fullName, required String email, required String password}) async {
+    final res = await sb.auth.signUp(
+      email: email.trim(),
+      password: password,
+      data: {'full_name': fullName.trim()},
+      emailRedirectTo: kIsWeb ? null : Env.oauthRedirect,
+    );
+    return res.session != null;
+  }
+
   Future<void> signInWithProvider(OAuthProvider provider) => sb.auth.signInWithOAuth(
         provider,
         redirectTo: kIsWeb ? null : Env.oauthRedirect,
@@ -47,7 +60,10 @@ class AuthRepository {
   Future<void> signOut() async {
     if (Env.offline) return;
     AppState.instance.selectTenant(null);
-    await sb.auth.signOut();
+    try {
+      clearStackcpSession();
+    } catch (_) {} // never let panel cleanup block the actual sign-out
+    await sb.auth.signOut(); // router redirect sends the user back to /login
   }
 
   /// True when the user has a verified TOTP factor that hasn't been proven in this session yet.

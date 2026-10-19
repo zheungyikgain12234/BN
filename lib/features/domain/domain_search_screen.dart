@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import '../../core/theme.dart';
+import '../../data/stackcp_sso.dart';
 
 /// Embeds the white-labelled 20i control panel (StackCP) in an iframe.
 /// Set [_panelUrl] to your brand domain once configured (e.g. https://cp.yourdomain.com/).
@@ -18,22 +19,30 @@ class DomainSearchScreen extends StatefulWidget {
 class _DomainSearchScreenState extends State<DomainSearchScreen> {
   // Override at build time: flutter build web --dart-define=PANEL_URL=https://cp.yourdomain.com/
   static const _panelUrl = String.fromEnvironment('PANEL_URL', defaultValue: 'https://cp.biznesthub.net/domain-search');
-  static const _viewType = 'stackcp-domain-frame';
-  static bool _registered = false;
+  static int _counter = 0;
+  String? _viewType;
 
   @override
   void initState() {
     super.initState();
-    if (!_registered) {
-      ui_web.platformViewRegistry.registerViewFactory(_viewType, (int _) {
-        return web.HTMLIFrameElement()
-          ..src = _panelUrl
-          ..style.border = 'none'
-          ..style.width = '100%'
-          ..style.height = '100%';
-      });
-      _registered = true;
-    }
+    _load();
+  }
+
+  /// Signs the user into the panel (session cookie) before the frame or a new tab opens it.
+  Future<String> _ssoUrl() => stackcpUrl(_panelUrl);
+
+  Future<void> _load() async {
+    final url = await _ssoUrl();
+    if (!mounted) return;
+    final type = 'stackcp-domain-frame-${_counter++}';
+    ui_web.platformViewRegistry.registerViewFactory(type, (int _) {
+      return web.HTMLIFrameElement()
+        ..src = url
+        ..style.border = 'none'
+        ..style.width = '100%'
+        ..style.height = '100%';
+    });
+    setState(() => _viewType = type);
   }
 
   @override
@@ -44,16 +53,22 @@ class _DomainSearchScreenState extends State<DomainSearchScreen> {
         Row(children: [
           Expanded(child: Text('Domains & Hosting', style: T.headlineLg)),
           OutlinedButton.icon(
-            onPressed: () => web.window.open(_panelUrl, '_blank'),
+            onPressed: () async => web.window.open(await _ssoUrl(), '_blank'),
             icon: const Icon(Icons.open_in_new, size: 16),
             label: const Text('Open in new tab'),
           ),
         ]),
+        ValueListenableBuilder<String>(
+          valueListenable: ssoStatus,
+          builder: (_, v, _) => Padding(padding: const EdgeInsets.only(top: 8), child: SelectableText(v, style: T.bodySm)),
+        ),
         const SizedBox(height: 12),
         Expanded(
           child: Container(
             decoration: BoxDecoration(border: Border.all(color: C.outline)),
-            child: const HtmlElementView(viewType: _viewType),
+            child: _viewType == null
+                ? const Center(child: CircularProgressIndicator())
+                : HtmlElementView(key: ValueKey(_viewType), viewType: _viewType!),
           ),
         ),
       ]),

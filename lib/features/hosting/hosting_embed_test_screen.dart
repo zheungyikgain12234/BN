@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
 import '../../core/theme.dart';
+import '../../data/stackcp_sso.dart';
 
 /// Test page: loads a URL (e.g. the white-labelled StackCP) in an iframe.
 /// If the frame stays blank, the target site is blocking framing
@@ -20,9 +21,11 @@ class _HostingEmbedTestScreenState extends State<HostingEmbedTestScreen> {
   String? _viewType;
   int _counter = 0;
 
-  void _load() {
-    final url = _url.text.trim();
-    if (url.isEmpty) return;
+  Future<void> _load() async {
+    final typed = _url.text.trim();
+    if (typed.isEmpty) return;
+    final url = await stackcpUrl(typed);
+    if (!mounted) return;
     final type = 'stackcp-frame-${_counter++}';
     ui_web.platformViewRegistry.registerViewFactory(type, (int _) {
       return web.HTMLIFrameElement()

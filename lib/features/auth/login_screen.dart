@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../app_router.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/repository.dart';
@@ -155,6 +157,11 @@ class _LoginScreenState extends State<LoginScreen> {
               leading: const _GoogleG(),
               onTap: _loading ? null : () => _run(() => authRepo.signInWithProvider(OAuthProvider.google)),
             ),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text("Don't have an account? ", style: T.bodySm.copyWith(color: C.secondary)),
+              InkWell(onTap: () => context.go(Routes.register), child: Text('Create one', style: T.labelSm.copyWith(color: C.primary))),
+            ]),
             const SizedBox(height: 24),
             Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: const [
               Pill('SOC 2 Type II', icon: Icons.verified_user_outlined, fg: C.tertiary),

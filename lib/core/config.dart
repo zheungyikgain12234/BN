@@ -1,7 +1,9 @@
-/// Supply with: flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
+/// Defaults point at the Biznest Supabase project. Override with:
+/// flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
+/// (The publishable key is public by design; never put a service-role or secret key here.)
 class Env {
-  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-  static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://noomyjgwxiqevchvopjy.supabase.co');
+  static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: 'sb_publishable_aAb6Tn2R_pNbUQOvljwoEw_DWe1EDOW');
   static bool get configured => supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   /// No Supabase credentials: run the UI only (no login, demo tenant, opens on Domain Search).
