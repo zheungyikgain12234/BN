@@ -7,18 +7,21 @@ import '../../core/theme.dart';
 import '../../data/stackcp_sso.dart';
 
 /// Embeds the white-labelled 20i control panel (StackCP) in an iframe.
-/// Set [_panelUrl] to your brand domain once configured (e.g. https://cp.yourdomain.com/).
+/// Each sidebar entry passes its own panel [url].
 /// If the frame is blank, the panel is blocking framing — use the new-tab button.
-class DomainSearchScreen extends StatefulWidget {
-  const DomainSearchScreen({super.key});
+class PanelEmbedScreen extends StatefulWidget {
+  const PanelEmbedScreen({super.key, required this.title, required this.url, this.embedded = false});
+  final String title;
+  final String url;
+
+  /// Just the frame, with no heading, for use inside another page.
+  final bool embedded;
 
   @override
-  State<DomainSearchScreen> createState() => _DomainSearchScreenState();
+  State<PanelEmbedScreen> createState() => _PanelEmbedScreenState();
 }
 
-class _DomainSearchScreenState extends State<DomainSearchScreen> {
-  // Override at build time: flutter build web --dart-define=PANEL_URL=https://cp.yourdomain.com/
-  static const _panelUrl = String.fromEnvironment('PANEL_URL', defaultValue: 'https://cp.biznesthub.net/domain-search');
+class _PanelEmbedScreenState extends State<PanelEmbedScreen> {
   static int _counter = 0;
   String? _viewType;
 
@@ -29,7 +32,7 @@ class _DomainSearchScreenState extends State<DomainSearchScreen> {
   }
 
   /// Signs the user into the panel (session cookie) before the frame or a new tab opens it.
-  Future<String> _ssoUrl() => stackcpUrl(_panelUrl);
+  Future<String> _ssoUrl() => stackcpUrl(widget.url);
 
   Future<void> _load() async {
     final url = await _ssoUrl();
@@ -47,11 +50,17 @@ class _DomainSearchScreenState extends State<DomainSearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) {
+      return Container(
+        decoration: BoxDecoration(border: Border.all(color: C.outlineVariant)),
+        child: _viewType == null ? const Center(child: CircularProgressIndicator()) : HtmlElementView(key: ValueKey(_viewType), viewType: _viewType!),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Expanded(child: Text('Domains & Hosting', style: T.headlineLg)),
+          Expanded(child: Text(widget.title, style: T.headlineLg)),
           OutlinedButton.icon(
             onPressed: () async => web.window.open(await _ssoUrl(), '_blank'),
             icon: const Icon(Icons.open_in_new, size: 16),

@@ -4,6 +4,9 @@
 class Env {
   static const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://noomyjgwxiqevchvopjy.supabase.co');
   static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: 'sb_publishable_aAb6Tn2R_pNbUQOvljwoEw_DWe1EDOW');
+  /// White-labelled hosting panel (embedded order pages and basket). Override: --dart-define=PANEL_BASE=https://cp.yourdomain.com
+  static const panelBase = String.fromEnvironment('PANEL_BASE', defaultValue: 'https://cp.biznesthub.net');
+
   static bool get configured => supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   /// No Supabase credentials: run the UI only (no login, demo tenant, opens on Domain Search).

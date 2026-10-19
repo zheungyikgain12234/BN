@@ -11,6 +11,25 @@ class Tenant {
   final String id, name, code, domain, plan, role;
   final int seats;
 
+  /// Just an id + name, as listed on the pre-login company screen.
+  Tenant.basic({required this.id, required this.name})
+      : code = '',
+        domain = '',
+        plan = 'enterprise',
+        seats = 0,
+        role = 'member';
+
+  /// Plain row from `tenants`.
+  factory Tenant.fromRow(Map<String, dynamic> t, {String role = 'member'}) => Tenant(
+        id: t['id'] as String,
+        name: t['name'] as String,
+        code: (t['code'] ?? '') as String,
+        domain: (t['domain'] ?? '') as String,
+        plan: (t['plan'] ?? 'enterprise') as String,
+        seats: (t['seats_active'] ?? 0) as int,
+        role: role,
+      );
+
   String get initials {
     final w = name.split(' ').where((e) => e.isNotEmpty).toList();
     return w.take(2).map((e) => e[0].toUpperCase()).join();
@@ -31,65 +50,86 @@ class Tenant {
   }
 }
 
+class SoftwareCategory {
+  SoftwareCategory({required this.id, required this.name, this.icon, this.sortOrder = 0});
+  final String id, name;
+  final String? icon;
+  final int sortOrder;
+
+  factory SoftwareCategory.fromJson(Map<String, dynamic> j) => SoftwareCategory(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        icon: j['icon'] as String?,
+        sortOrder: (j['sort_order'] ?? 0) as int,
+      );
+}
+
 class Product {
   Product({
     required this.id,
     required this.name,
-    required this.category,
-    required this.description,
-    required this.pricingModel,
-    required this.priceLabel,
-    required this.rating,
-    this.imageUrl,
-    this.publisher = '',
-    this.sku = '',
-    this.ratingCount = 0,
-    this.tags = const [],
-    this.version = '',
+    this.tenantId,
+    this.tenantName = '',
+    this.categoryId,
+    this.categoryName = '',
+    this.categoryIcon,
+    this.description = '',
     this.about = '',
-    this.billingCycle = '',
-    this.minCommitment = '',
-    this.cloudTargets = '',
-    this.publisherCode = '',
-    this.multiTenant = false,
-    this.seatPrice = '',
+    this.version = '',
+    this.sku = '',
+    this.pricingModel = '',
+    this.price,
+    this.currency = '',
+    this.imageUrl,
+    this.tags = const [],
+    this.createdAt,
   });
-  final String id, name, category, description, pricingModel, priceLabel, publisher, sku, version;
-  final String about, billingCycle, minCommitment, cloudTargets, publisherCode, seatPrice;
-  final double rating;
-  final int ratingCount;
-  final String? imageUrl;
+  final String id, name, tenantName, categoryName, description, about, version, sku, pricingModel, currency;
+  final String? tenantId, categoryId, categoryIcon, imageUrl;
+  final double? price;
   final List<String> tags;
-  final bool multiTenant;
+  final DateTime? createdAt;
 
-  factory Product.fromJson(Map<String, dynamic> j) => Product(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        category: (j['category'] ?? '') as String,
-        description: (j['description'] ?? '') as String,
-        pricingModel: (j['pricing_model'] ?? '') as String,
-        priceLabel: (j['price_label'] ?? '') as String,
-        rating: ((j['rating'] ?? 0) as num).toDouble(),
-        ratingCount: (j['rating_count'] ?? 0) as int,
-        imageUrl: j['image_url'] as String?,
-        publisher: (j['publisher'] ?? '') as String,
-        sku: (j['sku'] ?? '') as String,
-        version: (j['version'] ?? '') as String,
-        about: (j['about'] ?? '') as String,
-        billingCycle: (j['billing_cycle'] ?? '') as String,
-        minCommitment: (j['min_commitment'] ?? '') as String,
-        cloudTargets: (j['cloud_targets'] ?? '') as String,
-        publisherCode: (j['publisher_code'] ?? '') as String,
-        multiTenant: (j['multi_tenant'] ?? false) as bool,
-        seatPrice: (j['seat_price'] ?? '') as String,
-        tags: ((j['tags'] ?? const []) as List).cast<String>(),
-      );
+  /// "USD 22.00" (or just the number when no currency is set); empty when the app has no price.
+  String get priceLabel => price == null ? '' : [if (currency.isNotEmpty) currency, _money(price!)].join(' ');
+
+  /// "per user / monthly" style unit line under the price.
+  String get priceUnit => pricingModel;
+
+  static String _money(double v) => v.toStringAsFixed(2);
+
+  /// Row from `products` with embedded `software_categories` and `tenants`.
+  factory Product.fromJson(Map<String, dynamic> j) {
+    final cat = j['software_categories'] as Map<String, dynamic>?;
+    final ten = j['tenants'] as Map<String, dynamic>?;
+    return Product(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      tenantId: j['tenant_id'] as String?,
+      tenantName: (ten?['name'] ?? '') as String,
+      categoryId: j['category_id'] as String?,
+      categoryName: (cat?['name'] ?? '') as String,
+      categoryIcon: cat?['icon'] as String?,
+      description: (j['description'] ?? '') as String,
+      about: (j['about'] ?? '') as String,
+      version: (j['version'] ?? '') as String,
+      sku: (j['sku'] ?? '') as String,
+      pricingModel: (j['pricing_model'] ?? '') as String,
+      price: (j['price'] as num?)?.toDouble(),
+      currency: (j['currency'] ?? '') as String,
+      imageUrl: j['image_url'] as String?,
+      tags: ((j['tags'] ?? const []) as List).cast<String>(),
+      createdAt: j['created_at'] == null ? null : DateTime.tryParse(j['created_at'] as String),
+    );
+  }
 }
 
 class ProductScreenshot {
-  ProductScreenshot({required this.title, required this.caption, required this.url});
+  ProductScreenshot({this.id, required this.title, required this.caption, required this.url});
+  final String? id;
   final String title, caption, url;
   factory ProductScreenshot.fromJson(Map<String, dynamic> j) => ProductScreenshot(
+        id: j['id'] as String?,
         title: (j['title'] ?? '') as String,
         caption: (j['caption'] ?? '') as String,
         url: j['image_url'] as String,
@@ -99,38 +139,50 @@ class ProductScreenshot {
 class ProductComment {
   ProductComment({
     required this.id,
+    required this.userId,
     required this.authorName,
     required this.authorTitle,
-    required this.badge,
     required this.body,
     required this.createdAt,
-    required this.endorsements,
-    required this.replies,
     this.attachmentName,
     this.attachmentUrl,
     this.attachmentType,
     this.avatarUrl,
   });
-  final String id, authorName, authorTitle, badge, body;
+  final String id, userId, authorName, authorTitle, body;
   final DateTime createdAt;
-  final int endorsements, replies;
   final String? attachmentName, attachmentUrl, attachmentType, avatarUrl;
+
+  bool get hasImage => attachmentUrl != null && attachmentType == 'image';
 
   factory ProductComment.fromJson(Map<String, dynamic> j) {
     final p = (j['profiles'] as Map<String, dynamic>?) ?? const {};
     return ProductComment(
       id: j['id'] as String,
-      authorName: (p['full_name'] ?? 'Unknown user') as String,
+      userId: (j['user_id'] ?? '') as String,
+      authorName: (p['full_name'] ?? '') as String,
       authorTitle: (p['job_title'] ?? '') as String,
       avatarUrl: p['avatar_url'] as String?,
-      badge: (j['badge'] ?? '') as String,
-      body: j['body'] as String,
+      body: (j['body'] ?? '') as String,
       createdAt: DateTime.parse(j['created_at'] as String),
-      endorsements: (j['endorsements'] ?? 0) as int,
-      replies: (j['replies'] ?? 0) as int,
       attachmentName: j['attachment_name'] as String?,
       attachmentUrl: j['attachment_url'] as String?,
       attachmentType: j['attachment_type'] as String?,
     );
   }
+}
+
+class CartItem {
+  CartItem({required this.id, required this.quantity, required this.product});
+  final String id;
+  final int quantity;
+  final Product product;
+
+  double get subtotal => (product.price ?? 0) * quantity;
+
+  factory CartItem.fromJson(Map<String, dynamic> j) => CartItem(
+        id: j['id'] as String,
+        quantity: (j['quantity'] ?? 1) as int,
+        product: Product.fromJson(j['products'] as Map<String, dynamic>),
+      );
 }

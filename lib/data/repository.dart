@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:web/web.dart' as web;
 
 import '../core/config.dart';
 import 'models.dart';
@@ -7,19 +8,122 @@ import 'stackcp_sso.dart';
 
 SupabaseClient get sb => Supabase.instance.client;
 
-/// Session-wide state: which tenant the user picked on the company-select screen.
+/// Session-wide state. Sign-in comes first; afterwards the user picks one of the companies they
+/// belong to (a super admin can pick any company).
 class AppState extends ChangeNotifier {
   AppState._();
   static final instance = AppState._();
 
+  static const _savedCompanyKey = 'biznest.company';
+
   Tenant? _tenant = Env.offline
       ? Tenant(id: 'demo', name: 'Gain City Digital Innovation Pte Ltd', code: 'TEN-94820-SG', domain: 'gaincity.com.sg', plan: 'enterprise', seats: 142, role: 'admin')
       : null;
+
+  /// The company the user is currently working in.
   Tenant? get tenant => _tenant;
 
-  void selectTenant(Tenant? t) {
+  List<Tenant> _companies = const [];
+
+  /// Companies the signed-in user can enter (all of them for a super admin).
+  List<Tenant> get companies => _companies;
+
+  bool _isAdmin = false;
+  bool get isAdmin => _isAdmin;
+
+  /// Super admin: manages companies and users (and may edit any catalog).
+  bool get isSuperAdmin => _isAdmin;
+
+  /// Company admin: membership role "admin" in the selected company.
+  bool get isCompanyAdmin => _tenant?.role == 'admin';
+
+  /// Can add, edit and delete software.
+  bool get canManageCatalog => isSuperAdmin || isCompanyAdmin;
+
+  bool _verified = false;
+
+  /// True once the signed-in user's companies have been loaded.
+  bool get verified => Env.offline || _verified;
+
+  bool _skippedCompany = false;
+
+  /// True once the user is inside a company (or a super admin chose to continue without one).
+  bool get entered => Env.offline || _tenant != null || _skippedCompany;
+
+  /// Set while signIn() runs its own check, so the auth-state listener doesn't start a second one.
+  bool busy = false;
+
+  void selectTenant(Tenant t) {
     _tenant = t;
+    _skippedCompany = false;
+    _remember(t.id);
     notifyListeners();
+  }
+
+  /// A super admin may work without picking a company (e.g. when none exist yet).
+  void enterWithoutCompany() {
+    _skippedCompany = true;
+    notifyListeners();
+  }
+
+  /// Back to the company list, keeping the session.
+  void switchCompany() {
+    _tenant = null;
+    _skippedCompany = false;
+    _remember(null);
+    notifyListeners();
+  }
+
+  void reset() {
+    _tenant = null;
+    _companies = const [];
+    _isAdmin = false;
+    _verified = false;
+    _skippedCompany = false;
+    _remember(null);
+    notifyListeners();
+  }
+
+  /// Loads the signed-in user's companies. Returns an error message, or null when the user may continue.
+  Future<String?> loadAccess() async {
+    final uid = sb.auth.currentUser!.id;
+    final admin = await sb.from('app_admins').select('user_id').eq('user_id', uid).maybeSingle() != null;
+    final memberships = await tenantRepo.myTenants();
+
+    List<Tenant> companies = memberships;
+    if (admin) {
+      final rows = await sb.from('tenants').select().order('name');
+      final roleOf = {for (final m in memberships) m.id: m.role};
+      companies = [for (final r in rows) Tenant.fromRow(r, role: roleOf[r['id']] ?? 'admin')];
+    }
+    if (companies.isEmpty && !admin) return 'This account is not linked to any company.';
+
+    _isAdmin = admin;
+    _companies = companies;
+    // come back to the company used last time, if the user still has access to it
+    final saved = _savedCompany();
+    _tenant = _tenant == null ? companies.where((c) => c.id == saved).firstOrNull : companies.where((c) => c.id == _tenant!.id).firstOrNull;
+    _verified = true;
+    notifyListeners();
+    return null;
+  }
+
+  static String? _savedCompany() {
+    try {
+      return web.window.localStorage.getItem(_savedCompanyKey);
+    } catch (_) {
+      return null; // storage can be blocked; the user just picks again
+    }
+  }
+
+  static void _remember(String? id) {
+    try {
+      if (id == null) {
+        web.window.localStorage.removeItem(_savedCompanyKey);
+      } else {
+        web.window.localStorage.setItem(_savedCompanyKey, id);
+      }
+    } catch (_) {}
   }
 
   String get displayName {
@@ -34,16 +138,47 @@ class AppState extends ChangeNotifier {
 }
 
 class AuthRepository {
-  Future<void> signIn(String email, String password) =>
-      sb.auth.signInWithPassword(email: email.trim(), password: password);
+  /// Email + password first. The user must belong to at least one company (or be a super admin);
+  /// the company itself is chosen on the next screen.
+  Future<void> signIn({required String email, required String password}) async {
+    final app = AppState.instance;
+    app.busy = true;
+    try {
+      await sb.auth.signInWithPassword(email: email.trim(), password: password);
+      final error = await app.loadAccess();
+      if (error != null) {
+        app.reset();
+        await sb.auth.signOut();
+        throw AuthException(error);
+      }
+    } finally {
+      app.busy = false;
+    }
+  }
 
-  /// Creates the account. Returns true when a session was started right away; false when the
-  /// project requires email confirmation first.
-  Future<bool> signUp({required String fullName, required String email, required String password}) async {
+  bool _restoring = false;
+
+  /// Loads the companies of a session that appeared without signIn() (page reload, sign-up).
+  /// Users who don't belong to a company are signed out again.
+  Future<void> restore() async {
+    if (_restoring || sb.auth.currentSession == null) return;
+    _restoring = true;
+    try {
+      if (await AppState.instance.loadAccess() != null) await signOut();
+    } catch (_) {
+      await signOut();
+    } finally {
+      _restoring = false;
+    }
+  }
+
+  /// Creates the account in [companyId] (the DB trigger adds the membership). Returns true when a
+  /// session was started right away; false when the project requires email confirmation first.
+  Future<bool> signUp({required String fullName, required String email, required String password, required String companyId}) async {
     final res = await sb.auth.signUp(
       email: email.trim(),
       password: password,
-      data: {'full_name': fullName.trim()},
+      data: {'full_name': fullName.trim(), 'company_id': companyId},
       emailRedirectTo: kIsWeb ? null : Env.oauthRedirect,
     );
     return res.session != null;
@@ -59,7 +194,7 @@ class AuthRepository {
 
   Future<void> signOut() async {
     if (Env.offline) return;
-    AppState.instance.selectTenant(null);
+    AppState.instance.reset();
     try {
       clearStackcpSession();
     } catch (_) {} // never let panel cleanup block the actual sign-out
@@ -82,41 +217,17 @@ class AuthRepository {
 }
 
 class TenantRepository {
+  /// Every company (id + name only), readable before sign-in for the company picker.
+  Future<List<Tenant>> companies() async {
+    final rows = await sb.rpc('list_companies') as List;
+    return rows.map<Tenant>((r) => Tenant.basic(id: r['id'] as String, name: r['name'] as String)).toList();
+  }
+
   Future<List<Tenant>> myTenants() async {
     final rows = await sb.from('tenant_members').select('role, tenants(*)').eq('user_id', sb.auth.currentUser!.id);
     return rows.map<Tenant>(Tenant.fromMember).toList();
   }
 }
 
-class CatalogRepository {
-  Future<List<Product>> products() async {
-    final rows = await sb.from('products').select().order('sort_order');
-    return rows.map<Product>(Product.fromJson).toList();
-  }
-
-  Future<Product> product(String id) async => Product.fromJson(await sb.from('products').select().eq('id', id).single());
-
-  Future<List<ProductScreenshot>> screenshots(String productId) async {
-    final rows = await sb.from('product_screenshots').select().eq('product_id', productId).order('sort_order');
-    return rows.map<ProductScreenshot>(ProductScreenshot.fromJson).toList();
-  }
-
-  Future<List<ProductComment>> comments(String productId) async {
-    final rows = await sb
-        .from('product_comments')
-        .select('*, profiles(full_name, job_title, avatar_url)')
-        .eq('product_id', productId)
-        .order('endorsements', ascending: false)
-        .order('created_at', ascending: false);
-    return rows.map<ProductComment>(ProductComment.fromJson).toList();
-  }
-
-  Future<int> commentCount(String productId) => sb.from('product_comments').count().eq('product_id', productId);
-
-  Future<void> postComment(String productId, String body) =>
-      sb.from('product_comments').insert({'product_id': productId, 'body': body});
-}
-
 final authRepo = AuthRepository();
 final tenantRepo = TenantRepository();
-final catalogRepo = CatalogRepository();

@@ -4,7 +4,7 @@ import 'theme.dart';
 
 /// White rounded surface used everywhere (the `bg-surface-container-lowest rounded-xl shadow-sm` pattern).
 class AppCard extends StatelessWidget {
-  const AppCard({super.key, required this.child, this.padding = const EdgeInsets.all(24), this.color = C.surfaceLowest, this.onTap, this.clip = false});
+  const AppCard({super.key, required this.child, this.padding = const EdgeInsets.all(16), this.color = C.surfaceLowest, this.onTap, this.clip = false});
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color color;
@@ -16,7 +16,8 @@ class AppCard extends StatelessWidget {
     final deco = BoxDecoration(
       color: color,
       borderRadius: BorderRadius.circular(12),
-      boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 1))],
+      border: Border.all(color: C.outlineVariant.withValues(alpha: 0.6)),
+      boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8, offset: Offset(0, 2))],
     );
     final inner = Padding(padding: padding, child: child);
     return Container(
@@ -30,7 +31,7 @@ class AppCard extends StatelessWidget {
 }
 
 class PrimaryButton extends StatelessWidget {
-  const PrimaryButton({super.key, required this.label, this.icon, this.onPressed, this.loading = false, this.color = C.primary, this.height = 44, this.expand = true});
+  const PrimaryButton({super.key, required this.label, this.icon, this.onPressed, this.loading = false, this.color = C.primary, this.height = 40, this.expand = true});
   final String label;
   final IconData? icon;
   final VoidCallback? onPressed;
@@ -56,10 +57,10 @@ class PrimaryButton extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (loading)
-            const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
           else ...[
             Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: T.labelLg.copyWith(color: Colors.white))),
-            if (icon != null) ...[const SizedBox(width: 8), Icon(icon, size: 18)],
+            if (icon != null) ...[const SizedBox(width: 8), Icon(icon, size: 16)],
           ],
         ],
       ),
@@ -144,7 +145,7 @@ class AuthScaffold extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxWidth),
-                child: AppCard(padding: const EdgeInsets.all(32), child: child),
+                child: AppCard(padding: const EdgeInsets.all(24), child: child),
               ),
             ),
           ),
@@ -152,24 +153,46 @@ class AuthScaffold extends StatelessWidget {
       );
 }
 
-/// Filled rounded input like the designs (grey field, blue ring on focus).
+/// Bordered input: light fill, 1px border, italic placeholder (dropdown hints stay upright, see [dropdownHint]).
 InputDecoration fieldDecoration({String? hint, IconData? prefix, Widget? suffix}) {
-  OutlineInputBorder b(Color c, [double w = 0]) =>
-      OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: w == 0 ? BorderSide.none : BorderSide(color: c, width: w));
+  OutlineInputBorder b(Color c, [double w = 1]) => OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c, width: w));
   return InputDecoration(
     hintText: hint,
-    hintStyle: T.bodyMd.copyWith(color: C.outline),
-    prefixIcon: prefix == null ? null : Icon(prefix, size: 20, color: C.secondary),
+    hintStyle: T.bodyMd.copyWith(color: C.outline.withValues(alpha: 0.75), fontStyle: FontStyle.italic),
+    prefixIcon: prefix == null ? null : Icon(prefix, size: 18, color: C.secondary),
     suffixIcon: suffix,
     filled: true,
     fillColor: C.surfaceLow,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    border: b(Colors.transparent),
-    enabledBorder: b(Colors.transparent),
-    focusedBorder: b(C.primaryContainer, 2),
-    errorBorder: b(C.error, 1),
-    focusedErrorBorder: b(C.error, 2),
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+    border: b(C.outlineVariant),
+    enabledBorder: b(C.outlineVariant),
+    focusedBorder: b(C.primary, 1.5),
+    errorBorder: b(C.error),
+    focusedErrorBorder: b(C.error, 1.5),
   );
+}
+
+/// Placeholder for dropdowns: regular (non-italic) text like "Select a department".
+Widget dropdownHint(String text) => Text(text, style: T.bodyMd.copyWith(color: C.outline.withValues(alpha: 0.85)));
+
+/// Form row: bold label (red * when required) above the field.
+class LabeledField extends StatelessWidget {
+  const LabeledField({super.key, required this.label, required this.child, this.required = false, this.helper});
+  final String label;
+  final Widget child;
+  final bool required;
+  final String? helper;
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text.rich(TextSpan(text: label, style: T.labelMd, children: [
+          if (required) const TextSpan(text: ' *', style: TextStyle(color: C.error)),
+        ])),
+        const SizedBox(height: 6),
+        child,
+        if (helper != null) ...[const SizedBox(height: 4), Text(helper!, style: T.labelSm.copyWith(color: C.secondary))],
+      ]);
 }
 
 void showError(BuildContext context, Object e) {

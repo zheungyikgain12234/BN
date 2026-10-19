@@ -103,7 +103,7 @@ class _MfaScreenState extends State<MfaScreen> {
       if (!mounted) return;
       setState(() => _verified = true);
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      if (mounted) context.go(Routes.tenants);
+      if (mounted) context.go(Routes.domainSearch);
     } on AuthException catch (e) {
       if (!mounted) return;
       showError(context, e.message);
