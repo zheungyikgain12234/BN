@@ -74,6 +74,8 @@ class _SoftwareStoreScreenState extends State<SoftwareStoreScreen> {
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(
           content: Text('${p.name} added to cart'),
+          persist: false, // snackbars with an action otherwise stay until dismissed
+          duration: const Duration(seconds: 4),
           action: SnackBarAction(label: 'View cart', onPressed: () => context.go(Routes.cart)),
         ));
     } catch (e) {
@@ -142,9 +144,12 @@ class _SoftwareStoreScreenState extends State<SoftwareStoreScreen> {
             ),
           ),
         ),
-        DropdownButtonHideUnderline(
-          child: DropdownButton<_Sort>(
-            value: _sort,
+        SizedBox(
+          width: 190,
+          child: DropdownButtonFormField<_Sort>(
+            initialValue: _sort,
+            isExpanded: true,
+            decoration: fieldDecoration(),
             borderRadius: BorderRadius.circular(8),
             items: [for (final s in _Sort.values) DropdownMenuItem(value: s, child: Text(s.label))],
             onChanged: (v) => setState(() => _sort = v ?? _sort),

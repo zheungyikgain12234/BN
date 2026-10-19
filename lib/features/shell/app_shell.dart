@@ -34,13 +34,11 @@ List<_NavGroup> _navFor(AppState s) => [
       ]),
       _NavGroup('Software Solutions', [
         const _NavItem('Software', Icons.apps, Routes.software),
-        if (s.canManageCatalog) ...const [
-          _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
-          _NavItem('Masters', Icons.tune, Routes.adminMasters),
-        ],
       ]),
       if (s.canManageCatalog)
         _NavGroup('Administration', [
+          const _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
+          if (s.isSuperAdmin) const _NavItem('Masters', Icons.tune, Routes.adminMasters),
           if (s.isSuperAdmin) const _NavItem('Companies', Icons.business_outlined, Routes.adminCompanies),
           const _NavItem('Users', Icons.manage_accounts_outlined, Routes.adminUsers),
         ]),

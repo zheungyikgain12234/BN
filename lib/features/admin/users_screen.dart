@@ -8,7 +8,7 @@ import '../../data/admin_repository.dart';
 import '../../data/models.dart';
 import '../../data/repository.dart';
 
-/// Admin: create, edit, suspend and delete users. A user can belong to several companies.
+/// Admin: create, edit and delete users. A user can belong to several companies.
 /// Super admins manage every user; company admins manage users of the companies they administer.
 class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
@@ -78,15 +78,6 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
-  Future<void> _toggleSuspend(ManagedUser u) async {
-    try {
-      await adminRepo.updateUser(u.id, suspended: !u.suspended);
-      _load();
-    } catch (e) {
-      if (mounted) showError(context, e);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final me = sb.auth.currentUser?.id;
@@ -126,9 +117,8 @@ class _UsersScreenState extends State<UsersScreen> {
                           sortValue: (u) => _companiesText(u).toLowerCase(),
                           cell: (u) => u.memberships.isEmpty
                               ? const Text('—')
-                              : Wrap(spacing: 6, runSpacing: 4, children: [
-                                  for (final m in u.memberships)
-                                    Pill('${_companyName(m.companyId)} · ${roleLabel(m.role)}', bg: m.role == roleCompanyAdmin ? C.primaryFixed : C.surfaceContainer, fg: m.role == roleCompanyAdmin ? C.onPrimaryFixed : C.onSurfaceVariant, radius: 4),
+                              : Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                                  for (final m in u.memberships) Text('${_companyName(m.companyId)} · ${roleLabel(m.role)}', style: T.bodyMd),
                                 ]),
                         ),
                         TableCol(
@@ -149,12 +139,6 @@ class _UsersScreenState extends State<UsersScreen> {
                       actions: (u) => [
                         IconButton(tooltip: 'Edit', icon: const Icon(Icons.edit_outlined, size: 18), onPressed: () => _edit(u)),
                         if (u.id != me) ...[
-                          if (u.canEditAccount)
-                            IconButton(
-                              tooltip: u.suspended ? 'Reactivate' : 'Suspend',
-                              icon: Icon(u.suspended ? Icons.lock_open : Icons.block, size: 18, color: C.secondary),
-                              onPressed: () => _toggleSuspend(u),
-                            ),
                           IconButton(
                             tooltip: u.canEditAccount ? 'Delete' : 'Remove from company',
                             icon: const Icon(Icons.delete_outline, size: 18, color: C.error),

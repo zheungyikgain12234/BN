@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web/web.dart' as web;
 
 import '../core/config.dart';
+import '../main.dart' show messengerKey;
 import 'models.dart';
 import 'stackcp_sso.dart';
 
@@ -194,6 +195,7 @@ class AuthRepository {
 
   Future<void> signOut() async {
     if (Env.offline) return;
+    messengerKey.currentState?.clearSnackBars();
     AppState.instance.reset();
     try {
       clearStackcpSession();

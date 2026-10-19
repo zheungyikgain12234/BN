@@ -80,7 +80,8 @@ final router = GoRouter(
     if (onAuthScreen || loc == Routes.company || loc == Routes.mfa) return Routes.domainSearch;
     if (loc == Routes.adminCompanies && !app.isSuperAdmin) return Routes.domainSearch;
     if (loc == Routes.adminUsers && !app.canManageCatalog) return Routes.domainSearch;
-    if ((loc == Routes.adminSoftware || loc == Routes.adminMasters) && !app.canManageCatalog) return Routes.domainSearch;
+    if (loc == Routes.adminSoftware && !app.canManageCatalog) return Routes.domainSearch;
+    if (loc == Routes.adminMasters && !app.isSuperAdmin) return Routes.domainSearch;
     return null;
   },
   routes: [

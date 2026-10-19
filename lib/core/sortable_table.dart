@@ -113,12 +113,16 @@ class _SortableTableState<R> extends State<SortableTable<R>> {
     final sortable = [for (var i = 0; i < widget.columns.length; i++) if (widget.columns[i].sortValue != null) i];
     final sortPicker = narrow && sortable.isNotEmpty
         ? Row(mainAxisSize: MainAxisSize.min, children: [
-            DropdownButton<int>(
-              value: _sortCol,
-              hint: const Text('Sort by'),
-              underline: const SizedBox.shrink(),
-              items: [for (final i in sortable) DropdownMenuItem(value: i, child: Text(widget.columns[i].label))],
-              onChanged: (v) => setState(() => _sortCol = v),
+            SizedBox(
+              width: 150,
+              child: DropdownButtonFormField<int>(
+                initialValue: _sortCol,
+                isExpanded: true,
+                decoration: fieldDecoration(),
+                hint: const Text('Sort by'),
+                items: [for (final i in sortable) DropdownMenuItem(value: i, child: Text(widget.columns[i].label))],
+                onChanged: (v) => setState(() => _sortCol = v),
+              ),
             ),
             IconButton(
               tooltip: _asc ? 'Ascending' : 'Descending',

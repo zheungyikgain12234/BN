@@ -6,6 +6,9 @@ import 'core/config.dart';
 import 'core/theme.dart';
 import 'data/repository.dart';
 
+/// Lets snackbars be cleared from outside the widget tree (e.g. on sign-out).
+final messengerKey = GlobalKey<ScaffoldMessengerState>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Env.configured) {
@@ -22,6 +25,7 @@ class BizNestApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp.router(
         title: 'BizNest Hub',
         debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: messengerKey,
         theme: buildTheme(),
         routerConfig: router,
       );
