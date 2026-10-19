@@ -11,8 +11,11 @@ class MasterField {
 
 /// Describes one master table so a single screen and form can manage all of them.
 class MasterDef {
-  const MasterDef({required this.table, required this.title, required this.singular, required this.fields, required this.orderBy});
+  const MasterDef({required this.table, required this.title, required this.singular, required this.fields, required this.orderBy, required this.usageKind, required this.valueKey});
   final String table, title, singular, orderBy;
+
+  /// How apps reference this master (see public.reassign_master) and which column holds that reference.
+  final String usageKind, valueKey;
   final List<MasterField> fields;
 
   /// Column shown as the row's name (the first field).
@@ -25,6 +28,8 @@ const masterDefs = <MasterDef>[
     title: 'Categories',
     singular: 'category',
     orderBy: 'name',
+    usageKind: 'category',
+    valueKey: 'id',
     fields: [
       MasterField('name', 'Name', required: true, hint: 'Productivity'),
       MasterField('icon', 'Icon', kind: MasterFieldKind.icon, hint: 'Select an icon'),
@@ -35,6 +40,8 @@ const masterDefs = <MasterDef>[
     title: 'Tags',
     singular: 'tag',
     orderBy: 'name',
+    usageKind: 'tag',
+    valueKey: 'name',
     fields: [MasterField('name', 'Name', required: true, hint: 'Compliance')],
   ),
   MasterDef(
@@ -42,6 +49,8 @@ const masterDefs = <MasterDef>[
     title: 'Pricing models',
     singular: 'pricing model',
     orderBy: 'name',
+    usageKind: 'pricing_model',
+    valueKey: 'name',
     fields: [
       MasterField('name', 'Name', required: true, hint: 'Per user'),
     ],
@@ -51,6 +60,8 @@ const masterDefs = <MasterDef>[
     title: 'Currencies',
     singular: 'currency',
     orderBy: 'code',
+    usageKind: 'currency',
+    valueKey: 'code',
     fields: [
       MasterField('code', 'Code', required: true, hint: 'USD'),
       MasterField('name', 'Name', hint: 'US Dollar'),
@@ -73,6 +84,16 @@ class MasterRepository {
   }
 
   Future<void> delete(MasterDef def, String id) => sb.from(def.table).delete().eq('id', id);
+
+  /// How many apps still use this master value.
+  Future<int> usageCount(MasterDef def, Map<String, dynamic> row) async =>
+      (await sb.rpc('master_usage', params: {'kind': def.usageKind, 'old_value': '${row[def.valueKey]}'})) as int;
+
+  /// Moves every app from this value to [replacement] (null clears it), then deletes the master row.
+  Future<void> reassignAndDelete(MasterDef def, Map<String, dynamic> row, String? replacement) async {
+    await sb.rpc('reassign_master', params: {'kind': def.usageKind, 'old_value': '${row[def.valueKey]}', 'new_value': replacement});
+    await delete(def, row['id'] as String);
+  }
 
   /// Plain values for dropdowns and chips, e.g. every tag name.
   Future<List<String>> values(String table, String column, {String? orderBy}) async {

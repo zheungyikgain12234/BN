@@ -68,22 +68,34 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
     if (saved == true) _load();
   }
 
+  /// Deleting a value that apps still use first asks where those apps should go.
   Future<void> _delete(Map<String, dynamic> row) async {
-    final name = '${row[def.nameKey]}';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete ${def.singular}?'),
-        content: Text('"$name" will be removed from the list. Software already using it keeps its saved value.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete', style: TextStyle(color: C.error))),
-        ],
-      ),
-    );
-    if (ok != true) return;
     try {
-      await masterRepo.delete(def, row['id'] as String);
+      final inUse = await masterRepo.usageCount(def, row);
+      if (!mounted) return;
+      if (inUse == 0) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Delete ${def.singular}?'),
+            content: Text('"${row[def.nameKey]}" is not used by any app and will be removed.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete', style: TextStyle(color: C.error))),
+            ],
+          ),
+        );
+        if (ok != true) return;
+        await masterRepo.delete(def, row['id'] as String);
+      } else {
+        final others = _rows!.where((r) => r['id'] != row['id']).toList();
+        final choice = await showDialog<({String? value})>(
+          context: context,
+          builder: (_) => _ReassignDialog(def: def, row: row, inUse: inUse, others: others),
+        );
+        if (choice == null) return;
+        await masterRepo.reassignAndDelete(def, row, choice.value);
+      }
       _load();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -226,6 +238,65 @@ class _MasterDialogState extends State<_MasterDialog> {
       actions: [
         TextButton(onPressed: _saving ? null : () => Navigator.pop(context, false), child: const Text('Cancel')),
         FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Saving...' : 'Save')),
+      ],
+    );
+  }
+}
+
+/// Asks what to do with the apps that use a master value that is about to be deleted.
+class _ReassignDialog extends StatefulWidget {
+  const _ReassignDialog({required this.def, required this.row, required this.inUse, required this.others});
+  final MasterDef def;
+  final Map<String, dynamic> row;
+  final int inUse;
+  final List<Map<String, dynamic>> others;
+
+  @override
+  State<_ReassignDialog> createState() => _ReassignDialogState();
+}
+
+class _ReassignDialogState extends State<_ReassignDialog> {
+  String? _replacement; // null = clear it on the apps
+
+  String _label(Map<String, dynamic> r) => def.fields.take(2).map((f) => f.kind == MasterFieldKind.icon ? '' : '${r[f.key] ?? ''}').where((s) => s.isNotEmpty).join(' – ');
+
+  MasterDef get def => widget.def;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = '${widget.row[def.nameKey]}';
+    final apps = widget.inUse == 1 ? '1 app uses' : '${widget.inUse} apps use';
+    final isTag = def.usageKind == 'tag';
+    return AlertDialog(
+      title: Text('Reassign before deleting'),
+      scrollable: true,
+      content: SizedBox(
+        width: 380,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('$apps the ${def.singular} "$name". Choose what they should use instead, then it will be deleted.', style: T.bodyMd),
+          const SizedBox(height: 14),
+          LabeledField(
+            label: 'Move these apps to',
+            child: DropdownButtonFormField<String?>(
+              initialValue: _replacement,
+              isExpanded: true,
+              decoration: fieldDecoration(),
+              items: [
+                DropdownMenuItem<String?>(value: null, child: Text(isTag ? 'Just remove the tag' : 'None (leave it empty)')),
+                for (final r in widget.others) DropdownMenuItem<String?>(value: '${r[def.valueKey]}', child: Text(_label(r), overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (v) => setState(() => _replacement = v),
+            ),
+          ),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: C.error),
+          onPressed: () => Navigator.pop(context, (value: _replacement)),
+          child: const Text('Reassign & delete'),
+        ),
       ],
     );
   }

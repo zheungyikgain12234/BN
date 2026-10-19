@@ -164,3 +164,53 @@ create policy "currencies readable" on public.currencies for select to authentic
 drop policy if exists "currencies managed" on public.currencies;
 create policy "currencies managed" on public.currencies for all to authenticated
   using (public.is_any_company_admin()) with check (public.is_any_company_admin());
+
+-- 8. Reassigning before deleting a master value. security definer because a company admin cannot update
+--    other companies' apps directly, yet the master list is shared by every company.
+--    kind: category (old/new are category ids) | tag | pricing_model | currency (old/new are the stored text)
+--    new_value null = clear it (or drop the tag) from the apps.
+create or replace function public.master_usage(kind text, old_value text) returns int
+language plpgsql stable security definer set search_path = '' as $$
+declare n int;
+begin
+  if not public.is_any_company_admin() then raise exception 'not allowed'; end if;
+  if kind = 'category' then
+    select count(*) into n from public.products where category_id = old_value::uuid;
+  elsif kind = 'tag' then
+    select count(*) into n from public.products where old_value = any(tags);
+  elsif kind = 'pricing_model' then
+    select count(*) into n from public.products where pricing_model = old_value;
+  elsif kind = 'currency' then
+    select count(*) into n from public.products where currency = old_value;
+  else
+    raise exception 'unknown kind %', kind;
+  end if;
+  return n;
+end $$;
+
+create or replace function public.reassign_master(kind text, old_value text, new_value text) returns int
+language plpgsql security definer set search_path = '' as $$
+declare n int;
+begin
+  if not public.is_any_company_admin() then raise exception 'not allowed'; end if;
+  if kind = 'category' then
+    update public.products set category_id = nullif(new_value, '')::uuid where category_id = old_value::uuid;
+  elsif kind = 'tag' then
+    update public.products
+       set tags = case when new_value is null or new_value = ''
+                       then array_remove(tags, old_value)
+                       else (select coalesce(array_agg(distinct t), '{}') from unnest(array_replace(tags, old_value, new_value)) as t) end
+     where old_value = any(tags);
+  elsif kind = 'pricing_model' then
+    update public.products set pricing_model = nullif(new_value, '') where pricing_model = old_value;
+  elsif kind = 'currency' then
+    update public.products set currency = nullif(new_value, '') where currency = old_value;
+  else
+    raise exception 'unknown kind %', kind;
+  end if;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+grant execute on function public.master_usage(text, text) to authenticated;
+grant execute on function public.reassign_master(text, text, text) to authenticated;
