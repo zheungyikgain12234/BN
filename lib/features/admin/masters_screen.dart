@@ -17,7 +17,7 @@ class MastersScreen extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Masters', style: T.headlineLg),
+          Text('Master Data', style: T.headlineLg),
           const SizedBox(height: 4),
           Text('The lists used when adding software.', style: T.bodyMd.copyWith(color: C.secondary)),
           const SizedBox(height: 8),

@@ -31,7 +31,7 @@ class _PanelEmbedScreenState extends State<PanelEmbedScreen> {
     _load();
   }
 
-  /// Signs the user into the panel (session cookie) before the frame or a new tab opens it.
+  /// Signs the user into the panel (session cookie) before the frame loads it.
   Future<String> _ssoUrl() => stackcpUrl(widget.url);
 
   Future<void> _load() async {
@@ -59,18 +59,7 @@ class _PanelEmbedScreenState extends State<PanelEmbedScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          Expanded(child: Text(widget.title, style: T.headlineLg)),
-          OutlinedButton.icon(
-            onPressed: () async => web.window.open(await _ssoUrl(), '_blank'),
-            icon: const Icon(Icons.open_in_new, size: 16),
-            label: const Text('Open in new tab'),
-          ),
-        ]),
-        ValueListenableBuilder<String>(
-          valueListenable: ssoStatus,
-          builder: (_, v, _) => Padding(padding: const EdgeInsets.only(top: 8), child: SelectableText(v, style: T.bodySm)),
-        ),
+        Text(widget.title, style: T.headlineLg),
         const SizedBox(height: 12),
         Expanded(
           child: Container(

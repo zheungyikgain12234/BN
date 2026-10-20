@@ -66,7 +66,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Companies', style: T.headlineLg),
+        Text('Manage Companies', style: T.headlineLg),
         const SizedBox(height: 16),
         Expanded(
           child: _error != null

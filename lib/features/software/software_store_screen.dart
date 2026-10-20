@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -99,8 +100,6 @@ class _SoftwareStoreScreenState extends State<SoftwareStoreScreen> {
               constraints: const BoxConstraints(maxWidth: 1400),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Software', style: T.headlineLg),
-                const SizedBox(height: 4),
-                Text('Apps from every company', style: T.bodyMd.copyWith(color: C.secondary)),
                 const SizedBox(height: 16),
                 _controls(),
                 const SizedBox(height: 12),
@@ -171,12 +170,18 @@ class _SoftwareStoreScreenState extends State<SoftwareStoreScreen> {
             onSelected: (_) => onTap(),
           ),
         );
-    return SingleChildScrollView(
+    // Mouse/trackpad drag is off by default on desktop and web; enable it so the row scrolls sideways.
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.trackpad, PointerDeviceKind.stylus},
+      ),
+      child: SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
         chip('All', Icons.apps, _categoryId == null, () => setState(() => _categoryId = null)),
         for (final c in categories) chip(c.name, categoryIcon(c.icon), _categoryId == c.id, () => setState(() => _categoryId = c.id)),
       ]),
+      ),
     );
   }
 }

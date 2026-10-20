@@ -38,9 +38,9 @@ List<_NavGroup> _navFor(AppState s) => [
       if (s.canManageCatalog)
         _NavGroup('Administration', [
           const _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
-          if (s.isSuperAdmin) const _NavItem('Masters', Icons.tune, Routes.adminMasters),
-          if (s.isSuperAdmin) const _NavItem('Companies', Icons.business_outlined, Routes.adminCompanies),
-          const _NavItem('Users', Icons.manage_accounts_outlined, Routes.adminUsers),
+          if (s.isSuperAdmin) const _NavItem('Master Data', Icons.tune, Routes.adminMasters),
+          if (s.isSuperAdmin) const _NavItem('Manage Companies', Icons.business_outlined, Routes.adminCompanies),
+          const _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
         ]),
     ];
 

@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart';
+import 'dart:js_interop';
+
 import 'package:web/web.dart' as web;
 
 import '../core/config.dart';
@@ -10,8 +11,8 @@ const _cookieDomain = String.fromEnvironment('PANEL_COOKIE_DOMAIN', defaultValue
 
 const _flags = 'domain=$_cookieDomain; path=/; secure; samesite=none';
 
-/// Last SSO outcome, shown on the Domain Search screen while debugging.
-final ssoStatus = ValueNotifier<String>('SSO: not run yet');
+/// SSO outcome goes to the browser console (DevTools) rather than the UI.
+void _log(String msg) => web.console.info(msg.toJS);
 
 /// Logs the signed-in user into the panel (via the stackcp-sso Edge Function) and returns
 /// [panelUrl] to load. If SSO isn't possible the user just sees the panel's normal login.
@@ -27,12 +28,12 @@ Future<String> stackcpUrl(String panelUrl) async {
         names.add('${c['name']}');
       }
       final kept = names.where((n) => web.document.cookie.contains('$n=')).toList();
-      ssoStatus.value = 'SSO ok: server sent ${names.join(', ')}; browser kept ${kept.isEmpty ? 'none' : kept.join(', ')} (domain=$_cookieDomain, host=${web.window.location.host})';
+      _log('SSO ok: server sent ${names.join(', ')}; browser kept ${kept.isEmpty ? 'none' : kept.join(', ')} (domain=$_cookieDomain, host=${web.window.location.host})');
     } else {
-      ssoStatus.value = 'SSO failed: ${data?['reason'] ?? res.data}';
+      _log('SSO failed: ${data?['reason'] ?? res.data}');
     }
   } catch (e) {
-    ssoStatus.value = 'SSO error: $e';
+    _log('SSO error: $e');
   }
   return panelUrl;
 }

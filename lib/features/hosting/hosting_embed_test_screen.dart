@@ -60,15 +60,10 @@ class _HostingEmbedTestScreenState extends State<HostingEmbedTestScreen> {
           ),
           const SizedBox(width: 8),
           FilledButton(onPressed: _load, child: const Text('Load')),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: () => web.window.open(_url.text.trim(), '_blank'),
-            child: const Text('Open in new tab'),
-          ),
         ]),
         const SizedBox(height: 8),
         Text(
-          'Blank frame or "refused to connect"? The site blocks iframes — use "Open in new tab" or the 20i API instead.',
+          'Blank frame or "refused to connect"? The site blocks iframes — use the 20i API instead.',
           style: T.bodyMd.copyWith(color: C.secondary),
         ),
         const SizedBox(height: 12),

@@ -84,7 +84,7 @@ class _UsersScreenState extends State<UsersScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Users', style: T.headlineLg),
+        Text('Manage Users', style: T.headlineLg),
         const SizedBox(height: 16),
         Expanded(
           child: _error != null
@@ -113,7 +113,7 @@ class _UsersScreenState extends State<UsersScreen> {
                           ]),
                         ),
                         TableCol(
-                          label: 'Companies',
+                          label: 'Companies/Roles',
                           sortValue: (u) => _companiesText(u).toLowerCase(),
                           cell: (u) => u.memberships.isEmpty
                               ? const Text('—')
