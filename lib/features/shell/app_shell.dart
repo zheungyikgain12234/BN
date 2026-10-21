@@ -32,15 +32,19 @@ List<_NavGroup> _navFor(AppState s) => [
         _NavItem('SSL Certificates', Icons.lock_outline, Routes.orderSsl),
         _NavItem('WordPress Hosting', Icons.web, Routes.orderWordpress),
       ]),
-      _NavGroup('Software Solutions', [
-        const _NavItem('Software', Icons.apps, Routes.software),
+      const _NavGroup('Software Solutions', [
+        _NavItem('Software', Icons.apps, Routes.software),
+        _NavItem('Purchased Licenses', Icons.key_outlined, Routes.licenses),
+      ]),
+      const _NavGroup('Reseller', [
+        _NavItem('Clients', Icons.groups_outlined, Routes.clients),
       ]),
       if (s.canManageCatalog)
         _NavGroup('Administration', [
           const _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
           if (s.isSuperAdmin) const _NavItem('Master Data', Icons.tune, Routes.adminMasters),
           if (s.isSuperAdmin) const _NavItem('Manage Companies', Icons.business_outlined, Routes.adminCompanies),
-          const _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
+          if (s.canBuy) const _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
         ]),
     ];
 
@@ -75,13 +79,22 @@ class AppShell extends StatelessWidget {
   }
 }
 
-class _Sidebar extends StatelessWidget {
+class _Sidebar extends StatefulWidget {
   const _Sidebar({required this.isActive, required this.onSelect});
   final bool Function(_NavItem) isActive;
   final ValueChanged<String> onSelect;
 
   @override
+  State<_Sidebar> createState() => _SidebarState();
+}
+
+class _SidebarState extends State<_Sidebar> {
+  final _collapsed = <String>{};
+
+  @override
   Widget build(BuildContext context) {
+    final isActive = widget.isActive;
+    final onSelect = widget.onSelect;
     return ListenableBuilder(
       listenable: AppState.instance,
       builder: (_, _) => ListView(
@@ -89,11 +102,19 @@ class _Sidebar extends StatelessWidget {
         children: [
           for (final g in _navFor(AppState.instance)) ...[
             if (g.title != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                child: Text(g.title!.toUpperCase(), style: T.labelSm.copyWith(color: C.secondary, fontWeight: FontWeight.w600, letterSpacing: 0.9)),
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => setState(() => _collapsed.contains(g.title) ? _collapsed.remove(g.title) : _collapsed.add(g.title!)),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+                  child: Row(children: [
+                    Expanded(child: Text(g.title!.toUpperCase(), style: T.labelSm.copyWith(color: C.secondary, fontWeight: FontWeight.w600, letterSpacing: 0.9))),
+                    Icon(_collapsed.contains(g.title) ? Icons.expand_more : Icons.expand_less, size: 18, color: C.secondary),
+                  ]),
+                ),
               ),
-            for (final i in g.items) _NavTile(item: i, active: isActive(i), onTap: () => onSelect(i.path)),
+            if (!_collapsed.contains(g.title))
+              for (final i in g.items) _NavTile(item: i, active: isActive(i), onTap: () => onSelect(i.path)),
           ],
         ],
       ),
@@ -160,8 +181,21 @@ class _TopBar extends StatelessWidget {
             const SizedBox(width: 12),
             Text('BizNest Hub', style: T.headlineSm.copyWith(fontWeight: FontWeight.w700)),
           ],
-          const SizedBox(width: 16),
-          const Spacer(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ListenableBuilder(
+              listenable: state,
+              builder: (_, _) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  if (state.isSuperAdmin) const Pill('Admin portal', icon: Icons.admin_panel_settings_outlined, bg: C.primary, fg: Colors.white),
+                  if (state.isSuperAdmin && state.tenant != null) const SizedBox(width: 6),
+                  if (state.tenant != null)
+                    Pill('Reseller portal · ${state.tenant!.name}', icon: Icons.storefront_outlined, bg: C.primaryFixed, fg: C.onPrimaryFixed),
+                ]),
+              ),
+            ),
+          ),
           const _CartButton(),
           const SizedBox(width: 8),
           Tooltip(

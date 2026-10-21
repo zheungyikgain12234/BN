@@ -4,8 +4,8 @@ const roleCompanyAdmin = 'admin';
 const memberRoles = [roleCustomer, roleCompanyAdmin];
 
 String roleLabel(String role) => switch (role) {
-      roleCompanyAdmin => 'Company admin',
-      roleCustomer => 'Customer',
+      roleCompanyAdmin => 'Reseller admin',
+      roleCustomer => 'Reseller',
       _ => role,
     };
 
@@ -14,3 +14,5 @@ String formatDate(DateTime d) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
 }
+
+String money(double v, [String currency = '']) => '${currency.isEmpty ? '' : '$currency '}${v.toStringAsFixed(2)}';

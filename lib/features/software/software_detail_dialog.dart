@@ -156,7 +156,7 @@ class _SoftwareDetailDialogState extends State<SoftwareDetailDialog> {
         if (p.priceUnit.isNotEmpty) Text(p.priceUnit, style: T.labelSm.copyWith(color: C.secondary)),
         const SizedBox(height: 8),
       ],
-      PrimaryButton(label: 'Add to cart', icon: Icons.add_shopping_cart, loading: _adding, onPressed: _addToCart),
+      if (AppState.instance.canBuy) PrimaryButton(label: 'Add to cart', icon: Icons.add_shopping_cart, loading: _adding, onPressed: _addToCart),
       if (_added > 0) TextButton.icon(onPressed: _viewCart, icon: const Icon(Icons.check_circle, size: 16, color: C.tertiary), label: Text('Added ($_added) • View cart')),
     ]);
     return AppCard(

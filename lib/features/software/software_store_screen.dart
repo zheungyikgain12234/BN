@@ -7,6 +7,7 @@ import '../../core/icon_registry.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
+import '../../data/repository.dart';
 import '../../data/models.dart';
 import 'software_detail_dialog.dart';
 import 'software_widgets.dart';
@@ -118,7 +119,7 @@ class _SoftwareStoreScreenState extends State<SoftwareStoreScreen> {
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: items.length,
                     gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 340, mainAxisExtent: 236, crossAxisSpacing: 16, mainAxisSpacing: 16),
-                    itemBuilder: (_, i) => _AppCard(product: items[i], onOpen: () => showSoftwareDetail(context, items[i]), onAdd: () => _addToCart(items[i])),
+                    itemBuilder: (_, i) => _AppCard(product: items[i], onOpen: () => showSoftwareDetail(context, items[i]), onAdd: AppState.instance.canBuy ? () => _addToCart(items[i]) : null),
                   ),
               ]),
             ),
@@ -189,7 +190,8 @@ class _SoftwareStoreScreenState extends State<SoftwareStoreScreen> {
 class _AppCard extends StatelessWidget {
   const _AppCard({required this.product, required this.onOpen, required this.onAdd});
   final Product product;
-  final VoidCallback onOpen, onAdd;
+  final VoidCallback onOpen;
+  final VoidCallback? onAdd; // null for resellers who cannot buy
 
   @override
   Widget build(BuildContext context) {
@@ -222,7 +224,8 @@ class _AppCard extends StatelessWidget {
                     if (p.priceUnit.isNotEmpty) Text(p.priceUnit, maxLines: 1, overflow: TextOverflow.ellipsis, style: T.labelSm.copyWith(color: C.secondary)),
                   ]),
           ),
-          FilledButton.icon(
+          if (onAdd != null)
+            FilledButton.icon(
             onPressed: onAdd,
             style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             icon: const Icon(Icons.add_shopping_cart, size: 16),

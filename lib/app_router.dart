@@ -12,6 +12,8 @@ import 'features/admin/companies_screen.dart';
 import 'features/admin/masters_screen.dart';
 import 'features/admin/software_admin_screen.dart';
 import 'features/cart/cart_screen.dart';
+import 'features/clients/clients_screen.dart';
+import 'features/licenses/licenses_screen.dart';
 import 'features/software/software_store_screen.dart';
 import 'features/admin/users_screen.dart';
 import 'features/auth/company_select_screen.dart';
@@ -51,6 +53,8 @@ class Routes {
   static const mfa = '/mfa';
   static const software = '/software';
   static const cart = '/cart';
+  static const clients = '/clients';
+  static const licenses = '/licenses';
   static const adminSoftware = '/admin/software';
   static const adminMasters = '/admin/masters';
   static const domainSearch = '/domain-search';
@@ -79,7 +83,7 @@ final router = GoRouter(
     if (!app.entered) return loc == Routes.company ? null : Routes.company; // signed in, now pick a company
     if (onAuthScreen || loc == Routes.company || loc == Routes.mfa) return Routes.domainSearch;
     if (loc == Routes.adminCompanies && !app.isSuperAdmin) return Routes.domainSearch;
-    if (loc == Routes.adminUsers && !app.canManageCatalog) return Routes.domainSearch;
+    if (loc == Routes.adminUsers && !app.canBuy) return Routes.domainSearch;
     if (loc == Routes.adminSoftware && !app.canManageCatalog) return Routes.domainSearch;
     if (loc == Routes.adminMasters && !app.isSuperAdmin) return Routes.domainSearch;
     return null;
@@ -94,6 +98,8 @@ final router = GoRouter(
       routes: [
         GoRoute(path: Routes.software, builder: (_, _) => const SoftwareStoreScreen()),
         GoRoute(path: Routes.cart, builder: (_, _) => const CartScreen()),
+        GoRoute(path: Routes.clients, builder: (_, _) => const ClientsScreen()),
+        GoRoute(path: Routes.licenses, builder: (_, _) => const LicensesScreen()),
         GoRoute(path: Routes.adminSoftware, builder: (_, _) => const SoftwareAdminScreen()),
         GoRoute(path: Routes.adminMasters, builder: (_, _) => const MastersScreen()),
         for (final e in const {

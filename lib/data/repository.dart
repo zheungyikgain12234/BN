@@ -38,8 +38,11 @@ class AppState extends ChangeNotifier {
   /// Company admin: membership role "admin" in the selected company.
   bool get isCompanyAdmin => _tenant?.role == 'admin';
 
-  /// Can add, edit and delete software.
-  bool get canManageCatalog => isSuperAdmin || isCompanyAdmin;
+  /// Reseller admin (or super admin): can buy licenses and assign them to clients.
+  bool get canBuy => isSuperAdmin || isCompanyAdmin;
+
+  /// Every reseller manages their own company's software; a super admin manages any.
+  bool get canManageCatalog => isSuperAdmin || _tenant != null;
 
   bool _verified = false;
 
