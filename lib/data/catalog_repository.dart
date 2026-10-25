@@ -140,6 +140,34 @@ class CartRepository {
   }
 }
 
+/// Domains in the basket (one row per user + domain; adding again replaces the duration).
+class DomainCartRepository {
+  Future<List<DomainPrice>> prices() async {
+    final rows = await sb.from('domain_tld_prices').select().order('tld').order('years');
+    return rows.map<DomainPrice>(DomainPrice.fromJson).toList();
+  }
+
+  Future<List<DomainCartItem>> items() async {
+    final rows = await sb.from('domain_cart_items').select().order('created_at');
+    return rows.map<DomainCartItem>(DomainCartItem.fromJson).toList();
+  }
+
+  Future<void> add(String domain, DomainPrice p) async {
+    await sb.from('domain_cart_items').upsert({'domain': domain, 'years': p.years, 'price': p.price, 'currency': p.currency}, onConflict: 'user_id,domain');
+    await CartState.instance.refresh();
+  }
+
+  Future<void> remove(String id) async {
+    await sb.from('domain_cart_items').delete().eq('id', id);
+    await CartState.instance.refresh();
+  }
+
+  Future<void> clear() async {
+    await sb.from('domain_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
+    await CartState.instance.refresh();
+  }
+}
+
 class CartState extends ChangeNotifier {
   CartState._();
   static final instance = CartState._();
@@ -150,7 +178,8 @@ class CartState extends ChangeNotifier {
   Future<void> refresh() async {
     try {
       final rows = await sb.from('cart_items').select('quantity');
-      _count = rows.fold<int>(0, (sum, r) => sum + (r['quantity'] as int));
+      final domains = await sb.from('domain_cart_items').select('id').catchError((_) => <Map<String, dynamic>>[]); // table not created yet
+      _count = rows.fold<int>(0, (sum, r) => sum + (r['quantity'] as int)) + domains.length;
     } catch (_) {
       _count = 0; // the badge is cosmetic; never block the page on it
     }
@@ -160,3 +189,4 @@ class CartState extends ChangeNotifier {
 
 final catalogRepo = CatalogRepository();
 final cartRepo = CartRepository();
+final domainCartRepo = DomainCartRepository();

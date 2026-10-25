@@ -178,6 +178,88 @@ class _SoftwareCartState extends State<_SoftwareCart> {
   }
 }
 
+/// Domains added from Domain Search (API). Registration at checkout is not wired up yet.
+class _DomainCart extends StatefulWidget {
+  const _DomainCart();
+
+  @override
+  State<_DomainCart> createState() => _DomainCartState();
+}
+
+class _DomainCartState extends State<_DomainCart> {
+  List<DomainCartItem>? _items;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final items = await domainCartRepo.items();
+      if (mounted) setState(() => _items = items);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    try {
+      await action();
+      await _load();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) return ErrorRetry(error: _error!, onRetry: _load);
+    final items = _items;
+    if (items == null) return const Center(child: CircularProgressIndicator());
+    final byCurrency = <String, double>{};
+    for (final i in items) {
+      byCurrency.update(i.currency, (v) => v + i.price, ifAbsent: () => i.price);
+    }
+    return ListView(children: [
+      Row(children: [
+        OutlinedButton.icon(onPressed: () => context.go(Routes.domainSearchApi), icon: const Icon(Icons.travel_explore, size: 18), label: const Text('Search domains')),
+        const SizedBox(width: 8),
+        if (items.isNotEmpty)
+          TextButton.icon(onPressed: () => _run(domainCartRepo.clear), icon: const Icon(Icons.remove_shopping_cart_outlined, size: 18, color: C.error), label: const Text('Clear', style: TextStyle(color: C.error))),
+      ]),
+      const SizedBox(height: 12),
+      if (items.isEmpty) AppCard(child: Text('No domains in your basket.', style: T.bodyMd)),
+      for (final i in items)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: AppCard(
+            child: Row(children: [
+              const Icon(Icons.language, color: C.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(child: Text(i.domain, style: T.headlineSm)),
+              Text('${i.years} ${i.years == 1 ? 'year' : 'years'}', style: T.bodyMd),
+              const SizedBox(width: 16),
+              Text('${i.currency} ${i.price.toStringAsFixed(2)}', style: T.labelLg),
+              IconButton(tooltip: 'Remove', icon: const Icon(Icons.delete_outline, size: 18, color: C.error), onPressed: () => _run(() => domainCartRepo.remove(i.id))),
+            ]),
+          ),
+        ),
+      if (items.isNotEmpty)
+        AppCard(
+          child: Wrap(alignment: WrapAlignment.end, spacing: 24, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            Text('Total', style: T.labelMd.copyWith(color: C.secondary)),
+            for (final e in byCurrency.entries) Text('${e.key} ${e.value.toStringAsFixed(2)}', style: T.headlineSm.copyWith(color: C.primary)),
+            Text('Domain registration at checkout is coming soon.', style: T.bodySm.copyWith(color: C.secondary)),
+          ]),
+        ),
+    ]);
+  }
+}
+
 /// Cart page: our software cart, plus the hosting panel's own basket (domains, VPS, hosting, SSL).
 class CartScreen extends StatelessWidget {
   const CartScreen({super.key});
@@ -185,17 +267,18 @@ class CartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('My cart', style: T.headlineLg),
           const SizedBox(height: 8),
-          const TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [Tab(text: 'Software'), Tab(text: 'Hosting orders')]),
+          const TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [Tab(text: 'Software'), Tab(text: 'Domains'), Tab(text: 'Hosting orders')]),
           const SizedBox(height: 12),
           Expanded(
             child: TabBarView(children: [
               const _SoftwareCart(),
+              const _DomainCart(),
               PanelEmbedScreen(title: 'Hosting orders', url: '${Env.panelBase}/checkout', embedded: true),
             ]),
           ),

@@ -19,7 +19,7 @@ class MastersScreen extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Master Data', style: T.headlineLg),
           const SizedBox(height: 4),
-          Text('The lists used when adding software.', style: T.bodyMd.copyWith(color: C.secondary)),
+          Text('The lists used when adding software, and domain selling prices.', style: T.bodyMd.copyWith(color: C.secondary)),
           const SizedBox(height: 8),
           TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [for (final d in masterDefs) Tab(text: d.title)]),
           const SizedBox(height: 12),
@@ -126,10 +126,10 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
         for (var i = 0; i < def.fields.length; i++)
           TableCol<Map<String, dynamic>>(
             label: def.fields[i].label,
-            numeric: def.fields[i].kind == MasterFieldKind.integer,
+            numeric: def.fields[i].kind == MasterFieldKind.integer || def.fields[i].kind == MasterFieldKind.decimal,
             sortValue: (r) {
               final v = r[def.fields[i].key];
-              return def.fields[i].kind == MasterFieldKind.integer ? (v as num?) ?? 0 : '${v ?? ''}'.toLowerCase();
+              return def.fields[i].kind == MasterFieldKind.integer || def.fields[i].kind == MasterFieldKind.decimal ? (v as num?) ?? 0 : '${v ?? ''}'.toLowerCase();
             },
             cell: (r) => _cell(def.fields[i], r, i == 0),
           ),
@@ -181,6 +181,10 @@ class _MasterDialogState extends State<_MasterDialog> {
             values[f.key] = _icon[f.key];
           case MasterFieldKind.integer:
             values[f.key] = int.tryParse(_text[f.key]!.text.trim()) ?? 0;
+          case MasterFieldKind.decimal:
+            values[f.key] = double.tryParse(_text[f.key]!.text.trim()) ?? 0;
+          case MasterFieldKind.text when f.key == 'tld':
+            values[f.key] = _text[f.key]!.text.trim().toLowerCase().replaceFirst(RegExp(r'^\.'), '');
           case MasterFieldKind.text:
             final t = _text[f.key]!.text.trim();
             values[f.key] = t.isEmpty ? null : t;
@@ -225,7 +229,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                       )
                     : TextFormField(
                         controller: _text[f.key],
-                        keyboardType: f.kind == MasterFieldKind.integer ? TextInputType.number : null,
+                        keyboardType: f.kind == MasterFieldKind.integer || f.kind == MasterFieldKind.decimal ? const TextInputType.numberWithOptions(decimal: true) : null,
                         decoration: fieldDecoration(hint: f.hint),
                         validator: f.required ? (v) => (v == null || v.trim().isEmpty) ? '${f.label} is required' : null : null,
                       ),

@@ -1,6 +1,6 @@
 import 'repository.dart';
 
-enum MasterFieldKind { text, integer, icon }
+enum MasterFieldKind { text, integer, decimal, icon }
 
 class MasterField {
   const MasterField(this.key, this.label, {this.kind = MasterFieldKind.text, this.required = false, this.hint = ''});
@@ -67,6 +67,20 @@ const masterDefs = <MasterDef>[
       MasterField('name', 'Name', hint: 'US Dollar'),
     ],
   ),
+  MasterDef(
+    table: 'domain_tld_prices',
+    title: 'Domain prices',
+    singular: 'domain price',
+    orderBy: 'tld',
+    usageKind: '',
+    valueKey: 'id',
+    fields: [
+      MasterField('tld', 'Extension', required: true, hint: 'com or co.uk (no dot)'),
+      MasterField('years', 'Years', kind: MasterFieldKind.integer, required: true, hint: '1'),
+      MasterField('price', 'Price (whole duration)', kind: MasterFieldKind.decimal, required: true, hint: '21.74'),
+      MasterField('currency', 'Currency', required: true, hint: 'USD'),
+    ],
+  ),
 ];
 
 class MasterRepository {
@@ -86,8 +100,9 @@ class MasterRepository {
   Future<void> delete(MasterDef def, String id) => sb.from(def.table).delete().eq('id', id);
 
   /// How many apps still use this master value.
-  Future<int> usageCount(MasterDef def, Map<String, dynamic> row) async =>
-      (await sb.rpc('master_usage', params: {'kind': def.usageKind, 'old_value': '${row[def.valueKey]}'})) as int;
+  Future<int> usageCount(MasterDef def, Map<String, dynamic> row) async => def.usageKind.isEmpty
+      ? 0 // nothing references this master (e.g. domain prices)
+      : (await sb.rpc('master_usage', params: {'kind': def.usageKind, 'old_value': '${row[def.valueKey]}'})) as int;
 
   /// Moves every app from this value to [replacement] (null clears it), then deletes the master row.
   Future<void> reassignAndDelete(MasterDef def, Map<String, dynamic> row, String? replacement) async {

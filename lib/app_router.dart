@@ -17,6 +17,7 @@ import 'features/licenses/licenses_screen.dart';
 import 'features/software/software_store_screen.dart';
 import 'features/admin/users_screen.dart';
 import 'features/auth/company_select_screen.dart';
+import 'features/domain/domain_search_api_screen.dart';
 import 'features/domain/domain_search_screen.dart';
 import 'features/hosting/hosting_embed_test_screen.dart';
 import 'features/shell/app_shell.dart';
@@ -58,6 +59,7 @@ class Routes {
   static const adminSoftware = '/admin/software';
   static const adminMasters = '/admin/masters';
   static const domainSearch = '/domain-search';
+  static const domainSearchApi = '/domain-search-api';
   static const orderVps = '/order-vps';
   static const orderHosting = '/order-hosting';
   static const orderSsl = '/order-ssl';
@@ -110,6 +112,7 @@ final router = GoRouter(
           Routes.orderWordpress: 'WordPress Hosting',
         }.entries)
           GoRoute(path: e.key, builder: (_, _) => PanelEmbedScreen(title: e.value, url: '${Env.panelBase}${e.key}')),
+        GoRoute(path: Routes.domainSearchApi, builder: (_, _) => const DomainSearchApiScreen()),
         GoRoute(path: Routes.adminCompanies, builder: (_, _) => const CompaniesScreen()),
         GoRoute(path: Routes.adminUsers, builder: (_, _) => const UsersScreen()),
         GoRoute(path: Routes.hostingTest, builder: (_, _) => const HostingEmbedTestScreen()),

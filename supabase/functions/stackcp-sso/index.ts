@@ -128,10 +128,55 @@ async function panelLogin(username: string, password: string): Promise<Map<strin
   return check.status >= 300 && check.status < 400 && checkLoc.includes("login") ? null : jar;
 }
 
+type BasketItem = { name: string; productCode: string; periodMonths: number; currency: string; price: number };
+
+// Adds items to the panel's own basket (the same JSON-RPC call the panel's "Add to Basket" button makes).
+// Not a documented 20i API: the panel page must expose its CSRF pair, and the call may change if the panel does.
+async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): Promise<{ name: string; ok: boolean; detail: string }[]> {
+  const page = await fetch(`${PANEL}/domain-search`, { headers: { Cookie: cookieHeader(jar) } });
+  absorb(jar, page);
+  const html = await page.text();
+  const pick = (res: RegExp[]) => { for (const r of res) { const m = html.match(r); if (m) return m[1]; } return undefined; };
+  const csrfName = pick([/name="csrf[_-]name"\s+value="([^"]+)"/, /name="csrf[_-]name"\s+content="([^"]+)"/, /csrf[_-]name["']?\s*[:=,]\s*["']([^"']+)["']/i]);
+  const csrfValue = pick([/name="csrf[_-]value"\s+value="([^"]+)"/, /name="csrf[_-]value"\s+content="([^"]+)"/, /csrf[_-]value["']?\s*[:=,]\s*["']([^"']+)["']/i]);
+  if (!csrfName || !csrfValue) {
+    const at = html.search(/csrf/i);
+    console.error("stackcp-sso basket: csrf pair not found on", page.status, "page; context:", at < 0 ? "no 'csrf' text at all" : html.slice(Math.max(0, at - 150), at + 300));
+    return items.map((i) => ({ name: i.name, ok: false, detail: "could not read the panel's CSRF token" }));
+  }
+  const out: { name: string; ok: boolean; detail: string }[] = [];
+  for (const i of items) {
+    const res = await fetch(`${PANEL}/n/basket/own`, {
+      method: "POST",
+      headers: {
+        Cookie: cookieHeader(jar), "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest",
+        "csrf-name": csrfName, "csrf-value": csrfValue, Origin: PANEL, Referer: `${PANEL}/domain-search`,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0", method: "addWithInfo", id: null,
+        params: [{ paymentItemCountries: [] }, {
+          action: null, basket_pricing: 1, contact: null, currency: i.currency, dependentItems: {}, name: i.name,
+          paymentRef: null, paymentSelections: null, paymentType: "any", periodMonths: i.periodMonths,
+          productCode: i.productCode, productOptionSelections: null, quotedPriceFull: i.price, quotedVAT: 0,
+          service: null, serviceConfiguration: null, upgradeFromProductCode: null,
+        }],
+      }),
+    });
+    absorb(jar, res);
+    const text = await res.text();
+    console.log("stackcp-sso basket add", i.name, res.status, text.slice(0, 300));
+    let rpcError: string | undefined;
+    try { rpcError = JSON.parse(text)?.error?.message; } catch { /* not JSON */ }
+    out.push({ name: i.name, ok: res.ok && !rpcError, detail: rpcError ?? (res.ok ? "added" : `panel replied ${res.status}`) });
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
     if (!Deno.env.get("TWENTYI_API_KEY") || !Deno.env.get("SSO_PASSWORD_SECRET")) return fallback("sso not configured");
+    const body = await req.json().catch(() => ({}));
 
     // 1. Who is calling?
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
@@ -170,7 +215,9 @@ Deno.serve(async (req) => {
       jar = await panelLogin(panelUser, password);
     }
     if (!jar) return fallback("panel login failed");
-    return json({ sso: true, cookies: [...jar].map(([name, value]) => ({ name, value })) });
+    // Optional: push items into the panel basket in this same session, then hand the session to the browser.
+    const basket = Array.isArray(body?.basket) && body.basket.length ? await addToPanelBasket(jar, body.basket as BasketItem[]) : undefined;
+    return json({ sso: true, cookies: [...jar].map(([name, value]) => ({ name, value })), basket });
   } catch (e) {
     return fallback(String(e));
   }

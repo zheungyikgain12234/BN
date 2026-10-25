@@ -186,3 +186,31 @@ class CartItem {
         product: Product.fromJson(j['products'] as Map<String, dynamic>),
       );
 }
+
+/// What the reseller charges to register one extension for [years] (price is for the whole duration).
+class DomainPrice {
+  const DomainPrice({required this.tld, required this.years, required this.price, required this.currency});
+  final String tld, currency;
+  final int years;
+  final double price;
+
+  String get label => '$years ${years == 1 ? 'year' : 'years'} for $currency ${price.toStringAsFixed(2)}';
+
+  factory DomainPrice.fromJson(Map<String, dynamic> j) =>
+      DomainPrice(tld: j['tld'] as String, years: j['years'] as int, price: (j['price'] as num).toDouble(), currency: (j['currency'] ?? 'USD') as String);
+}
+
+class DomainCartItem {
+  const DomainCartItem({required this.id, required this.domain, required this.years, required this.price, required this.currency});
+  final String id, domain, currency;
+  final int years;
+  final double price;
+
+  factory DomainCartItem.fromJson(Map<String, dynamic> j) => DomainCartItem(
+        id: j['id'] as String,
+        domain: j['domain'] as String,
+        years: j['years'] as int,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}

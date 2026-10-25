@@ -38,6 +38,30 @@ Future<String> stackcpUrl(String panelUrl) async {
   return panelUrl;
 }
 
+/// Adds domains to the panel's own basket (cp.biznesthub.net) and gives the browser that same panel session, so the
+/// embedded basket shows them. Returns null on success, otherwise why it failed. Best effort: our own basket is
+/// the source of truth, this only mirrors it.
+Future<String?> addDomainsToPanelBasket(List<({String name, int years, String tld, String currency, double price})> items) async {
+  if (Env.offline || sb.auth.currentSession == null) return 'not signed in';
+  try {
+    final res = await sb.functions.invoke('stackcp-sso', body: {
+      'basket': [
+        for (final i in items)
+          {'name': i.name, 'productCode': 'domain:.${i.tld}', 'periodMonths': i.years * 12, 'currency': i.currency, 'price': i.price},
+      ],
+    });
+    final data = res.data as Map?;
+    if (data?['sso'] != true) return '${data?['reason'] ?? 'panel login failed'}';
+    for (final c in (data!['cookies'] as List)) {
+      web.document.cookie = '${c['name']}=${c['value']}; $_flags';
+    }
+    final failed = [for (final r in (data['basket'] as List? ?? const [])) if (r['ok'] != true) '${r['name']}: ${r['detail']}'];
+    return failed.isEmpty ? null : failed.join('; ');
+  } catch (e) {
+    return '$e';
+  }
+}
+
 /// Drops the panel session so the next user on this browser doesn't inherit it.
 void clearStackcpSession() {
   web.document.cookie = 'PHPSESSID=; $_flags; max-age=0';
