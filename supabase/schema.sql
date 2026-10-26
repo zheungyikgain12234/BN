@@ -57,7 +57,7 @@ create table public.product_screenshots (
 create table public.product_comments (
   id uuid primary key default gen_random_uuid(),
   product_id uuid references public.products on delete cascade,
-  user_id uuid references public.profiles default auth.uid(),
+  user_id uuid references public.profiles on delete cascade default auth.uid(),
   body text not null,
   badge text,
   attachment_name text, attachment_url text, attachment_type text,

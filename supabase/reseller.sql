@@ -38,7 +38,7 @@ create index if not exists clients_tenant_idx on public.clients (tenant_id);
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants on delete cascade,
-  user_id uuid not null default auth.uid() references auth.users on delete set null,
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
   created_at timestamptz not null default now()
 );
 

@@ -137,8 +137,9 @@ async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): 
   absorb(jar, page);
   const html = await page.text();
   const pick = (res: RegExp[]) => { for (const r of res) { const m = html.match(r); if (m) return m[1]; } return undefined; };
-  const csrfName = pick([/name="csrf[_-]name"\s+value="([^"]+)"/, /name="csrf[_-]name"\s+content="([^"]+)"/, /csrf[_-]name["']?\s*[:=,]\s*["']([^"']+)["']/i]);
-  const csrfValue = pick([/name="csrf[_-]value"\s+value="([^"]+)"/, /name="csrf[_-]value"\s+content="([^"]+)"/, /csrf[_-]value["']?\s*[:=,]\s*["']([^"']+)["']/i]);
+  // The panel writes <meta name="Csrf-Name" content="...">, so matching must ignore case.
+  const csrfName = pick([/name="csrf[_-]name"\s+value="([^"]+)"/i, /name="csrf[_-]name"\s+content="([^"]+)"/i, /csrf[_-]name["']?\s*[:=,]\s*["']([^"']+)["']/i]);
+  const csrfValue = pick([/name="csrf[_-]value"\s+value="([^"]+)"/i, /name="csrf[_-]value"\s+content="([^"]+)"/i, /csrf[_-]value["']?\s*[:=,]\s*["']([^"']+)["']/i]);
   if (!csrfName || !csrfValue) {
     const at = html.search(/csrf/i);
     console.error("stackcp-sso basket: csrf pair not found on", page.status, "page; context:", at < 0 ? "no 'csrf' text at all" : html.slice(Math.max(0, at - 150), at + 300));
