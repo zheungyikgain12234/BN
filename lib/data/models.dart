@@ -214,3 +214,31 @@ class DomainCartItem {
         currency: (j['currency'] ?? 'USD') as String,
       );
 }
+
+/// A paid (or pending) domain checkout, with one line per domain.
+class DomainOrder {
+  const DomainOrder({required this.id, required this.status, required this.currency, required this.total, required this.createdAt, required this.items});
+  final String id, status, currency;
+  final double total;
+  final DateTime createdAt;
+  final List<DomainOrderItem> items;
+
+  factory DomainOrder.fromJson(Map<String, dynamic> j) => DomainOrder(
+        id: j['id'] as String,
+        status: j['status'] as String,
+        currency: j['currency'] as String,
+        total: (j['total'] as num).toDouble(),
+        createdAt: DateTime.parse(j['created_at'] as String).toLocal(),
+        items: [for (final i in (j['domain_order_items'] as List? ?? const [])) DomainOrderItem.fromJson(i as Map<String, dynamic>)],
+      );
+}
+
+class DomainOrderItem {
+  const DomainOrderItem({required this.domain, required this.years, required this.status, this.note});
+  final String domain, status;
+  final int years;
+  final String? note;
+
+  factory DomainOrderItem.fromJson(Map<String, dynamic> j) =>
+      DomainOrderItem(domain: j['domain'] as String, years: j['years'] as int, status: j['status'] as String, note: j['note'] as String?);
+}

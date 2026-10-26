@@ -68,6 +68,8 @@ class Routes {
   static String section(String slug) => '/section/$slug';
 }
 
+/// Pages a super admin may open.
+const _superAdminRoutes = {Routes.adminCompanies, Routes.adminUsers, Routes.adminSoftware, Routes.adminMasters};
 
 final router = GoRouter(
   initialLocation: Env.offline ? Routes.domainSearch : Routes.login,
@@ -83,11 +85,14 @@ final router = GoRouter(
     if (authRepo.needsMfa) return loc == Routes.mfa ? null : Routes.mfa;
     if (!app.verified) return onAuthScreen ? null : Routes.login; // companies still loading
     if (!app.entered) return loc == Routes.company ? null : Routes.company; // signed in, now pick a company
-    if (onAuthScreen || loc == Routes.company || loc == Routes.mfa) return Routes.domainSearch;
-    if (loc == Routes.adminCompanies && !app.isSuperAdmin) return Routes.domainSearch;
-    if (loc == Routes.adminUsers && !app.canBuy) return Routes.domainSearch;
-    if (loc == Routes.adminSoftware && !app.canManageCatalog) return Routes.domainSearch;
-    if (loc == Routes.adminMasters && !app.isSuperAdmin) return Routes.domainSearch;
+    final home = app.isSuperAdmin ? Routes.adminCompanies : Routes.domainSearch;
+    if (onAuthScreen || loc == Routes.company || loc == Routes.mfa) return home;
+    // A super admin only manages: no shopping, clients or licenses pages.
+    if (app.isSuperAdmin && !_superAdminRoutes.contains(loc)) return home;
+    if (loc == Routes.adminCompanies && !app.isSuperAdmin) return home;
+    if (loc == Routes.adminUsers && !app.canManageUsers) return home;
+    if (loc == Routes.adminSoftware && !app.canManageCatalog) return home;
+    if (loc == Routes.adminMasters && !app.isSuperAdmin) return home;
     return null;
   },
   routes: [

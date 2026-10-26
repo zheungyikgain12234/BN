@@ -24,7 +24,16 @@ class _NavGroup {
 
 /// Sidebar groups for the signed-in user's role: everyone browses; company admins also manage software;
 /// super admins also manage companies and users.
-List<_NavGroup> _navFor(AppState s) => [
+List<_NavGroup> _navFor(AppState s) => s.isSuperAdmin
+    ? [ // a super admin has no company and buys nothing: management pages only
+        const _NavGroup('Administration', [
+          _NavItem('Manage Companies', Icons.business_outlined, Routes.adminCompanies),
+          _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
+          _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
+          _NavItem('Master Data', Icons.tune, Routes.adminMasters),
+        ]),
+      ]
+    : [
       const _NavGroup('Hosting Solutions', [
         _NavItem('Domain Search', Icons.language, Routes.domainSearch),
         _NavItem('Domain Search (API)', Icons.travel_explore, Routes.domainSearchApi),
@@ -43,9 +52,7 @@ List<_NavGroup> _navFor(AppState s) => [
       if (s.canManageCatalog)
         _NavGroup('Administration', [
           const _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
-          if (s.isSuperAdmin) const _NavItem('Master Data', Icons.tune, Routes.adminMasters),
-          if (s.isSuperAdmin) const _NavItem('Manage Companies', Icons.business_outlined, Routes.adminCompanies),
-          if (s.canBuy) const _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
+          if (s.canManageUsers) const _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
         ]),
     ];
 
@@ -197,8 +204,10 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ),
-          const _CartButton(),
-          const SizedBox(width: 8),
+          if (!state.isSuperAdmin) ...[
+            const _CartButton(),
+            const SizedBox(width: 8),
+          ],
           Tooltip(
             message: 'Account',
             child: InkWell(
@@ -250,7 +259,7 @@ class _TopBar extends StatelessWidget {
                     ]),
                   ),
                   const Divider(height: 1),
-                  if (AppState.instance.companies.length > 1 || AppState.instance.isSuperAdmin)
+                  if (AppState.instance.companies.length > 1 && !AppState.instance.isSuperAdmin)
                     InkWell(
                       mouseCursor: SystemMouseCursors.click,
                       onTap: () {

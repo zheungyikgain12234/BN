@@ -1,0 +1,78 @@
+// Receives Stripe's "payment finished" message, marks the order paid and registers the domains.
+// Deploy WITHOUT JWT verification (Stripe has no Supabase token; the signature below is the proof):
+//   supabase functions deploy stripe-webhook --no-verify-jwt
+// In Stripe (test mode) > Developers > Webhooks, add this function's URL for the event
+// checkout.session.completed, then copy the signing secret (whsec_...).
+//
+// Secrets:
+//   STRIPE_WEBHOOK_SECRET        whsec_...
+//   DOMAIN_REGISTRATION_LIVE     "true" to really register with 20i. Anything else = TEST MODE:
+//                                the order is paid (in Stripe test money) but registration is only logged.
+//   TWENTYI_API_KEY              used once live registration is added
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const enc = (s: string) => new TextEncoder().encode(s);
+const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+
+// Stripe-Signature: t=<time>,v1=<hmac of "<time>.<raw body>">
+async function validSignature(body: string, header: string, secret: string): Promise<boolean> {
+  const parts = Object.fromEntries(header.split(",").map((p) => p.split("=") as [string, string]));
+  const t = parts["t"], v1 = parts["v1"];
+  if (!t || !v1) return false;
+  if (Math.abs(Date.now() / 1000 - Number(t)) > 300) return false; // reject replays older than 5 minutes
+  const key = await crypto.subtle.importKey("raw", enc(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const expected = hex(await crypto.subtle.sign("HMAC", key, enc(`${t}.${body}`)));
+  return expected.length === v1.length && expected.split("").reduce((d, c, i) => d | (c.charCodeAt(0) ^ v1.charCodeAt(i)), 0) === 0;
+}
+
+type Item = { id: string; domain: string; years: number };
+
+// The real 20i registration call is not added yet: it needs the request captured from the panel's Network tab.
+async function registerWith20i(_userId: string, _item: Item): Promise<void> {
+  throw new Error("live registration is not implemented yet");
+}
+
+Deno.serve(async (req) => {
+  const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+  if (!secret) return new Response("not configured", { status: 500 });
+  const body = await req.text();
+  if (!(await validSignature(body, req.headers.get("stripe-signature") ?? "", secret))) {
+    return new Response("bad signature", { status: 400 });
+  }
+
+  const event = JSON.parse(body);
+  if (event.type !== "checkout.session.completed") return new Response("ignored");
+  const session = event.data.object;
+  if (session.payment_status !== "paid") return new Response("not paid yet");
+  const orderId = session.metadata?.order_id ?? session.client_reference_id;
+  if (!orderId) return new Response("no order id", { status: 400 });
+
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+  // Only the first delivery wins: Stripe may send the same event again, and we must not register twice.
+  const { data: claimed } = await admin.from("domain_orders")
+    .update({ status: "paid", paid_at: new Date().toISOString() })
+    .eq("id", orderId).eq("status", "pending").select("id, user_id").maybeSingle();
+  if (!claimed) return new Response("already handled");
+
+  const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
+  const { data: items } = await admin.from("domain_order_items").select("id, domain, years").eq("order_id", orderId);
+  for (const item of (items ?? []) as Item[]) {
+    if (!live) {
+      console.log(`TEST MODE: would register ${item.domain} for ${item.years} year(s) for user ${claimed.user_id}`);
+      await admin.from("domain_order_items").update({ status: "test_registered", note: "test mode: not sent to 20i" }).eq("id", item.id);
+      continue;
+    }
+    try {
+      await registerWith20i(claimed.user_id, item);
+      await admin.from("domain_order_items").update({ status: "registered" }).eq("id", item.id);
+    } catch (e) {
+      console.error("registration failed", item.domain, e);
+      await admin.from("domain_order_items").update({ status: "failed", note: String((e as Error).message ?? e).slice(0, 300) }).eq("id", item.id);
+    }
+  }
+
+  // The basket has been turned into an order, so empty the bought domains from it.
+  await admin.from("domain_cart_items").delete().eq("user_id", claimed.user_id).in("domain", (items ?? []).map((i) => i.domain));
+  return new Response("ok");
+});

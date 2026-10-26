@@ -1,7 +1,7 @@
 -- Reseller model: clients, purchased licenses, checkout. Run AFTER schema.sql, multitenant.sql, catalog.sql. Safe to re-run.
 --
 -- Roles
---   super admin     : public.app_admins          -> manages companies, users, masters; also a reseller of their own company
+--   super admin     : public.app_admins          -> manages companies, users, software, masters; no company, never buys or adds clients
 --   reseller admin  : tenant_members.role='admin'  -> manages software + clients, buys licenses, assigns them (with own markup)
 --   reseller        : tenant_members.role='member' -> manages software + clients, assigns purchased licenses; cannot buy
 -- Clients are private to the reseller company: not even a super admin sees other companies' clients.
@@ -13,11 +13,11 @@ language sql stable security definer set search_path = '' as $$
       or exists (select 1 from public.tenant_members where tenant_id = t and user_id = auth.uid())
 $$;
 
--- reseller admin (or super admin): may buy licenses for tenant t
+-- reseller admin: may buy licenses for tenant t. A super admin belongs to no company and never buys.
 create or replace function public.can_buy_for_tenant(t uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
-  select public.is_app_admin()
-      or exists (select 1 from public.tenant_members where tenant_id = t and user_id = auth.uid() and role = 'admin')
+  select not public.is_app_admin()
+     and exists (select 1 from public.tenant_members where tenant_id = t and user_id = auth.uid() and role = 'admin')
 $$;
 
 -- 2. Clients of a reseller company

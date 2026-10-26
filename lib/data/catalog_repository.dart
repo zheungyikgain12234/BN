@@ -166,6 +166,20 @@ class DomainCartRepository {
     await sb.from('domain_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
     await CartState.instance.refresh();
   }
+
+  /// Saves the basket as an order and returns the Stripe payment page to send the browser to.
+  Future<String> startCheckout(String returnUrl) async {
+    final res = await sb.functions.invoke('domain-checkout', body: {'returnUrl': returnUrl});
+    final data = res.data as Map?;
+    final url = data?['url'] as String?;
+    if (url == null) throw '${data?['error'] ?? 'Could not start checkout'}';
+    return url;
+  }
+
+  Future<List<DomainOrder>> orders() async {
+    final rows = await sb.from('domain_orders').select('*, domain_order_items(domain, years, status, note)').order('created_at', ascending: false).limit(10);
+    return rows.map<DomainOrder>(DomainOrder.fromJson).toList();
+  }
 }
 
 class CartState extends ChangeNotifier {

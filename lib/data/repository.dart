@@ -38,8 +38,11 @@ class AppState extends ChangeNotifier {
   /// Company admin: membership role "admin" in the selected company.
   bool get isCompanyAdmin => _tenant?.role == 'admin';
 
-  /// Reseller admin (or super admin): can buy licenses and assign them to clients.
-  bool get canBuy => isSuperAdmin || isCompanyAdmin;
+  /// Reseller admin: can buy licenses and assign them to clients. A super admin belongs to no company and never buys.
+  bool get canBuy => !isSuperAdmin && isCompanyAdmin;
+
+  /// Super admin (all users) or reseller admin (their company's users).
+  bool get canManageUsers => isSuperAdmin || isCompanyAdmin;
 
   /// Every reseller manages their own company's software; a super admin manages any.
   bool get canManageCatalog => isSuperAdmin || _tenant != null;
@@ -61,12 +64,6 @@ class AppState extends ChangeNotifier {
     _tenant = t;
     _skippedCompany = false;
     _remember(t.id);
-    notifyListeners();
-  }
-
-  /// A super admin may work without picking a company (e.g. when none exist yet).
-  void enterWithoutCompany() {
-    _skippedCompany = true;
     notifyListeners();
   }
 
@@ -104,9 +101,15 @@ class AppState extends ChangeNotifier {
 
     _isAdmin = admin;
     _companies = companies;
-    // come back to the company used last time, if the user still has access to it
-    final saved = _savedCompany();
-    _tenant = _tenant == null ? companies.where((c) => c.id == saved).firstOrNull : companies.where((c) => c.id == _tenant!.id).firstOrNull;
+    if (admin) {
+      // A super admin belongs to no company: straight into the admin portal, nothing to pick.
+      _tenant = null;
+      _skippedCompany = true;
+    } else {
+      // come back to the company used last time, if the user still has access to it
+      final saved = _savedCompany();
+      _tenant = _tenant == null ? companies.where((c) => c.id == saved).firstOrNull : companies.where((c) => c.id == _tenant!.id).firstOrNull;
+    }
     _verified = true;
     notifyListeners();
     return null;

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:web/web.dart' as web;
 
 import '../../app_router.dart';
 import '../../core/config.dart';
@@ -188,7 +189,9 @@ class _DomainCart extends StatefulWidget {
 
 class _DomainCartState extends State<_DomainCart> {
   List<DomainCartItem>? _items;
+  List<DomainOrder> _orders = const [];
   Object? _error;
+  bool _paying = false;
 
   @override
   void initState() {
@@ -200,7 +203,9 @@ class _DomainCartState extends State<_DomainCart> {
     setState(() => _error = null);
     try {
       final items = await domainCartRepo.items();
-      if (mounted) setState(() => _items = items);
+      // Orders are secondary: if their table isn't created yet the basket must still work.
+      final orders = await domainCartRepo.orders().catchError((_) => <DomainOrder>[]);
+      if (mounted) setState(() { _items = items; _orders = orders; });
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
@@ -212,6 +217,19 @@ class _DomainCartState extends State<_DomainCart> {
       await _load();
     } catch (e) {
       if (mounted) showError(context, e);
+    }
+  }
+
+  /// Sends the browser to Stripe's payment page; Stripe returns here afterwards.
+  Future<void> _checkout() async {
+    setState(() => _paying = true);
+    try {
+      final url = await domainCartRepo.startCheckout('${Uri.base.origin}/#${Routes.cart}');
+      web.window.location.href = url;
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _paying = false);
     }
   }
 
@@ -253,9 +271,29 @@ class _DomainCartState extends State<_DomainCart> {
           child: Wrap(alignment: WrapAlignment.end, spacing: 24, crossAxisAlignment: WrapCrossAlignment.center, children: [
             Text('Total', style: T.labelMd.copyWith(color: C.secondary)),
             for (final e in byCurrency.entries) Text('${e.key} ${e.value.toStringAsFixed(2)}', style: T.headlineSm.copyWith(color: C.primary)),
-            Text('Domain registration at checkout is coming soon.', style: T.bodySm.copyWith(color: C.secondary)),
+            if (byCurrency.length > 1)
+              Text('Your basket mixes currencies; remove some to check out.', style: T.bodySm.copyWith(color: C.error))
+            else
+              PrimaryButton(label: _paying ? 'Opening Stripe...' : 'Pay with Stripe (test)', icon: Icons.lock_outline, expand: false, onPressed: _paying ? null : _checkout),
           ]),
         ),
+      if (_orders.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        Row(children: [
+          Text('Recent orders', style: T.headlineSm),
+          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh, size: 18), onPressed: _load),
+        ]),
+        for (final o in _orders)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: AppCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${o.currency} ${o.total.toStringAsFixed(2)} · ${o.status}', style: T.labelLg),
+                for (final i in o.items) Text('${i.domain} · ${i.years} ${i.years == 1 ? 'year' : 'years'} · ${i.note ?? i.status}', style: T.bodySm),
+              ]),
+            ),
+          ),
+      ],
     ]);
   }
 }

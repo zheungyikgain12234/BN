@@ -32,7 +32,7 @@ create policy "domain prices managed" on public.domain_tld_prices for all to aut
 
 drop policy if exists "own domain cart" on public.domain_cart_items;
 create policy "own domain cart" on public.domain_cart_items for all to authenticated
-  using (user_id = auth.uid()) with check (user_id = auth.uid());
+  using (user_id = auth.uid()) with check (user_id = auth.uid() and not public.is_app_admin()); -- super admins never buy
 
 -- Starter prices (SGD, per whole duration; the panel quotes in SGD). Edit them in Master Data > Domain prices.
 insert into public.domain_tld_prices (tld, years, price) values

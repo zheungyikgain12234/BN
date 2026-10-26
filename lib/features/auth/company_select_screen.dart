@@ -71,10 +71,6 @@ class _CompanySelectScreenState extends State<CompanySelectScreen> {
                 itemBuilder: (_, i) => _CompanyTile(company: shown[i], onTap: () => app.selectTenant(shown[i])),
               ),
             ),
-          if (app.isSuperAdmin) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(onPressed: app.enterWithoutCompany, icon: const Icon(Icons.admin_panel_settings_outlined, size: 16), label: const Text('Continue without a company')),
-          ],
           const SizedBox(height: 14),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Flexible(child: Text('Signed in as $email  •  ', overflow: TextOverflow.ellipsis, style: T.bodySm.copyWith(color: C.secondary))),
