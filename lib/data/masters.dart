@@ -81,6 +81,21 @@ const masterDefs = <MasterDef>[
       MasterField('currency', 'Currency', required: true, hint: 'USD'),
     ],
   ),
+  MasterDef(
+    table: 'hosting_plan_prices',
+    title: 'Hosting prices',
+    singular: 'hosting price',
+    orderBy: 'plan_name',
+    usageKind: '',
+    valueKey: 'id',
+    fields: [
+      MasterField('plan_name', 'Plan name', required: true, hint: 'Starter hosting'),
+      MasterField('package_type_id', '20i plan id / shop code', required: true, hint: 'Pick from 20i, or paste a shop code'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '12'),
+      MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '60.00'),
+      MasterField('currency', 'Currency', required: true, hint: 'SGD'),
+    ],
+  ),
 ];
 
 class MasterRepository {

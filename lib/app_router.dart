@@ -20,6 +20,7 @@ import 'features/auth/company_select_screen.dart';
 import 'features/domain/domain_search_api_screen.dart';
 import 'features/domain/domain_search_screen.dart';
 import 'features/hosting/hosting_embed_test_screen.dart';
+import 'features/hosting/hosting_screen.dart';
 import 'features/shell/app_shell.dart';
 import 'features/shell/placeholder_screen.dart';
 
@@ -112,12 +113,12 @@ final router = GoRouter(
         for (final e in const {
           Routes.domainSearch: 'Domain Search',
           Routes.orderVps: 'VPS',
-          Routes.orderHosting: 'Web Hosting',
           Routes.orderSsl: 'SSL Certificates',
           Routes.orderWordpress: 'WordPress Hosting',
         }.entries)
           GoRoute(path: e.key, builder: (_, _) => PanelEmbedScreen(title: e.value, url: '${Env.panelBase}${e.key}')),
         GoRoute(path: Routes.domainSearchApi, builder: (_, _) => const DomainSearchApiScreen()),
+        GoRoute(path: Routes.orderHosting, builder: (_, _) => const HostingScreen()),
         GoRoute(path: Routes.adminCompanies, builder: (_, _) => const CompaniesScreen()),
         GoRoute(path: Routes.adminUsers, builder: (_, _) => const UsersScreen()),
         GoRoute(path: Routes.hostingTest, builder: (_, _) => const HostingEmbedTestScreen()),

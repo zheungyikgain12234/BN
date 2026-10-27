@@ -4,6 +4,7 @@ import '../../core/icon_registry.dart';
 import '../../core/sortable_table.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/catalog_repository.dart';
 import '../../data/masters.dart';
 
 /// Admin: manage the lists the software form picks from (categories, tags, pricing models, currencies).
@@ -170,6 +171,29 @@ class _MasterDialogState extends State<_MasterDialog> {
     super.dispose();
   }
 
+  /// Hosting prices: choose the plan from 20i's own list instead of typing its id.
+  Future<void> _pick20iPlan() async {
+    try {
+      final plans = await hostingCartRepo.plansFrom20i();
+      if (!mounted) return;
+      final chosen = await showDialog<({String id, String name})>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Plans from 20i'),
+          children: [
+            if (plans.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('20i returned no plans.')),
+            for (final p in plans) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, p), child: Text('${p.name}  (${p.id})')),
+          ],
+        ),
+      );
+      if (chosen == null) return;
+      _text['package_type_id']!.text = chosen.id;
+      if (_text['plan_name']!.text.trim().isEmpty) _text['plan_name']!.text = chosen.name;
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     setState(() => _saving = true);
@@ -227,12 +251,16 @@ class _MasterDialogState extends State<_MasterDialog> {
                         ],
                         onChanged: (v) => setState(() => _icon[f.key] = v),
                       )
-                    : TextFormField(
-                        controller: _text[f.key],
-                        keyboardType: f.kind == MasterFieldKind.integer || f.kind == MasterFieldKind.decimal ? const TextInputType.numberWithOptions(decimal: true) : null,
-                        decoration: fieldDecoration(hint: f.hint),
-                        validator: f.required ? (v) => (v == null || v.trim().isEmpty) ? '${f.label} is required' : null : null,
-                      ),
+                    : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        TextFormField(
+                          controller: _text[f.key],
+                          keyboardType: f.kind == MasterFieldKind.integer || f.kind == MasterFieldKind.decimal ? const TextInputType.numberWithOptions(decimal: true) : null,
+                          decoration: fieldDecoration(hint: f.hint),
+                          validator: f.required ? (v) => (v == null || v.trim().isEmpty) ? '${f.label} is required' : null : null,
+                        ),
+                        if (f.key == 'package_type_id')
+                          TextButton.icon(onPressed: _pick20iPlan, icon: const Icon(Icons.cloud_download_outlined, size: 18), label: const Text('Pick from 20i')),
+                      ]),
               ),
               const SizedBox(height: 14),
             ],

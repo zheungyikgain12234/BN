@@ -242,3 +242,69 @@ class DomainOrderItem {
   factory DomainOrderItem.fromJson(Map<String, dynamic> j) =>
       DomainOrderItem(domain: j['domain'] as String, years: j['years'] as int, status: j['status'] as String, note: j['note'] as String?);
 }
+
+/// What the reseller charges for one hosting plan over one billing period (Master Data > Hosting prices).
+class HostingPrice {
+  const HostingPrice({required this.packageTypeId, required this.planName, required this.months, required this.price, required this.currency});
+  final String packageTypeId, planName, currency;
+  final int months;
+  final double price;
+
+  String get label => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
+
+  factory HostingPrice.fromJson(Map<String, dynamic> j) => HostingPrice(
+        packageTypeId: j['package_type_id'] as String,
+        planName: j['plan_name'] as String,
+        months: j['months'] as int,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+class HostingCartItem {
+  const HostingCartItem({required this.id, required this.packageTypeId, required this.planName, required this.months, required this.domain, required this.price, required this.currency});
+  final String id, packageTypeId, planName, domain, currency;
+  final int months;
+  final double price;
+
+  factory HostingCartItem.fromJson(Map<String, dynamic> j) => HostingCartItem(
+        id: j['id'] as String,
+        packageTypeId: j['package_type_id'] as String,
+        planName: j['plan_name'] as String,
+        months: j['months'] as int,
+        domain: j['domain'] as String,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+/// A paid (or pending) hosting checkout, with one line per hosting package.
+class HostingOrder {
+  const HostingOrder({required this.id, required this.status, required this.currency, required this.total, required this.items});
+  final String id, status, currency;
+  final double total;
+  final List<HostingOrderItem> items;
+
+  factory HostingOrder.fromJson(Map<String, dynamic> j) => HostingOrder(
+        id: j['id'] as String,
+        status: j['status'] as String,
+        currency: j['currency'] as String,
+        total: (j['total'] as num).toDouble(),
+        items: [for (final i in (j['hosting_order_items'] as List? ?? const [])) HostingOrderItem.fromJson(i as Map<String, dynamic>)],
+      );
+}
+
+class HostingOrderItem {
+  const HostingOrderItem({required this.planName, required this.domain, required this.months, required this.status, this.note});
+  final String planName, domain, status;
+  final int months;
+  final String? note;
+
+  factory HostingOrderItem.fromJson(Map<String, dynamic> j) => HostingOrderItem(
+        planName: j['plan_name'] as String,
+        domain: j['domain'] as String,
+        months: j['months'] as int,
+        status: j['status'] as String,
+        note: j['note'] as String?,
+      );
+}

@@ -66,6 +66,64 @@ async function registerWith20i(admin: ReturnType<typeof createClient>, userId: s
   if (text.trim() === "false") throw new Error("20i refused the registration");
 }
 
+type HostingItem = { id: string; domain: string; package_type_id: string; plan_name: string; months: number };
+
+// 20i: POST /reseller/{id}/addWeb creates the hosting package for the domain. The documented body has no
+// billing period, so months is only stored on our side for now; check the first live result against 20i.
+async function createHostingWith20i(admin: ReturnType<typeof createClient>, userId: string, item: HostingItem): Promise<string> {
+  const key = Deno.env.get("TWENTYI_API_KEY");
+  if (!key) throw new Error("TWENTYI_API_KEY is not set");
+  const reseller = Deno.env.get("TWENTYI_RESELLER_ID") ?? "*";
+
+  const { data: su } = await admin.from("stackcp_users").select("stack_user_id").eq("user_id", userId).maybeSingle();
+  const body: Record<string, unknown> = { type: item.package_type_id, domain_name: item.domain, label: item.plan_name };
+  if (su?.stack_user_id) body.stackUser = su.stack_user_id;
+
+  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addWeb`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${btoa(key)}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  console.log("20i addWeb", item.domain, res.status, text.slice(0, 500));
+  if (!res.ok) throw new Error(`20i ${res.status}: ${text.slice(0, 250)}`);
+  // Success looks like {"result":3965135}: the new package id. Anything else is not a confirmed creation.
+  let packageId: unknown;
+  try { packageId = JSON.parse(text)?.result; } catch { /* handled below */ }
+  if (typeof packageId !== "number" && !(typeof packageId === "string" && packageId !== "")) {
+    throw new Error(`20i did not return a package id: ${text.slice(0, 200)}`);
+  }
+  return String(packageId);
+}
+
+// Same shape as the domain branch below, on the hosting_* tables.
+async function handleHosting(admin: ReturnType<typeof createClient>, orderId: string): Promise<Response> {
+  // Only the first delivery wins: Stripe may send the same event again, and we must not create twice.
+  const { data: claimed } = await admin.from("hosting_orders")
+    .update({ status: "paid", paid_at: new Date().toISOString() })
+    .eq("id", orderId).eq("status", "pending").select("id, user_id").maybeSingle();
+  if (!claimed) return new Response("already handled");
+
+  const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
+  const { data: items } = await admin.from("hosting_order_items").select("id, domain, package_type_id, plan_name, months").eq("order_id", orderId);
+  for (const item of (items ?? []) as HostingItem[]) {
+    if (!live) {
+      console.log(`TEST MODE: would create ${item.plan_name} for ${item.domain} for user ${claimed.user_id}`);
+      await admin.from("hosting_order_items").update({ status: "test_registered", note: "test mode: not sent to 20i" }).eq("id", item.id);
+      continue;
+    }
+    try {
+      const packageId = await createHostingWith20i(admin, claimed.user_id, item);
+      await admin.from("hosting_order_items").update({ status: "registered", note: `20i package ${packageId}` }).eq("id", item.id);
+    } catch (e) {
+      console.error("hosting creation failed", item.domain, e);
+      await admin.from("hosting_order_items").update({ status: "failed", note: String((e as Error).message ?? e).slice(0, 300) }).eq("id", item.id);
+    }
+  }
+  await admin.from("hosting_cart_items").delete().eq("user_id", claimed.user_id).in("domain", (items ?? []).map((i) => i.domain));
+  return new Response("ok");
+}
+
 Deno.serve(async (req) => {
   const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
   if (!secret) return new Response("not configured", { status: 500 });
@@ -82,6 +140,7 @@ Deno.serve(async (req) => {
   if (!orderId) return new Response("no order id", { status: 400 });
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  if (session.metadata?.kind === "hosting") return handleHosting(admin, orderId);
 
   // Only the first delivery wins: Stripe may send the same event again, and we must not register twice.
   const { data: claimed } = await admin.from("domain_orders")

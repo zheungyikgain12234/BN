@@ -192,6 +192,74 @@ class DomainCartRepository {
   }
 }
 
+/// Hosting packages in the basket (one row per user + domain). Prices are re-read from Master Data, like domains.
+class HostingCartRepository {
+  Future<List<HostingPrice>> prices() async {
+    final rows = await sb.from('hosting_plan_prices').select().order('plan_name').order('months');
+    return rows.map<HostingPrice>(HostingPrice.fromJson).toList();
+  }
+
+  Future<List<HostingCartItem>> items() async {
+    final rows = await sb.from('hosting_cart_items').select().order('created_at');
+    final items = rows.map<HostingCartItem>(HostingCartItem.fromJson).toList();
+    // Show today's Master Data price, the same one hosting-checkout charges (the saved price may be stale).
+    final prices = await this.prices();
+    return [
+      for (final i in items)
+        () {
+          final p = prices.where((x) => x.packageTypeId == i.packageTypeId && x.months == i.months).firstOrNull;
+          return p == null
+              ? i
+              : HostingCartItem(id: i.id, packageTypeId: i.packageTypeId, planName: p.planName, months: i.months, domain: i.domain, price: p.price, currency: p.currency);
+        }(),
+    ];
+  }
+
+  Future<void> add(String domain, HostingPrice p) async {
+    await sb.from('hosting_cart_items').upsert({
+      'domain': domain,
+      'package_type_id': p.packageTypeId,
+      'plan_name': p.planName,
+      'months': p.months,
+      'price': p.price,
+      'currency': p.currency,
+    }, onConflict: 'user_id,domain');
+    await CartState.instance.refresh();
+  }
+
+  Future<void> remove(String id) async {
+    await sb.from('hosting_cart_items').delete().eq('id', id);
+    await CartState.instance.refresh();
+  }
+
+  Future<void> clear() async {
+    await sb.from('hosting_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
+    await CartState.instance.refresh();
+  }
+
+  /// Saves the basket as an order and returns the Stripe payment page to send the browser to.
+  Future<String> startCheckout(String returnUrl) async {
+    final res = await sb.functions.invoke('hosting-checkout', body: {'returnUrl': returnUrl});
+    final data = res.data as Map?;
+    final url = data?['url'] as String?;
+    if (url == null) throw '${data?['error'] ?? 'Could not start checkout'}';
+    return url;
+  }
+
+  Future<List<HostingOrder>> orders() async {
+    final rows = await sb.from('hosting_orders').select('*, hosting_order_items(plan_name, domain, months, status, note)').order('created_at', ascending: false).limit(10);
+    return rows.map<HostingOrder>(HostingOrder.fromJson).toList();
+  }
+
+  /// Plans the reseller can sell, straight from 20i (for the Master Data picker).
+  Future<List<({String id, String name})>> plansFrom20i() async {
+    final res = await sb.functions.invoke('hosting-plans');
+    final data = res.data as Map?;
+    if (data?['error'] != null) throw '${data!['error']}';
+    return [for (final p in (data?['plans'] as List? ?? const [])) (id: '${p['id']}', name: '${p['name']}')];
+  }
+}
+
 class CartState extends ChangeNotifier {
   CartState._();
   static final instance = CartState._();
@@ -203,7 +271,8 @@ class CartState extends ChangeNotifier {
     try {
       final rows = await sb.from('cart_items').select('quantity');
       final domains = await sb.from('domain_cart_items').select('id').catchError((_) => <Map<String, dynamic>>[]); // table not created yet
-      _count = rows.fold<int>(0, (sum, r) => sum + (r['quantity'] as int)) + domains.length;
+      final hosting = await sb.from('hosting_cart_items').select('id').catchError((_) => <Map<String, dynamic>>[]); // table not created yet
+      _count = rows.fold<int>(0, (sum, r) => sum + (r['quantity'] as int)) + domains.length + hosting.length;
     } catch (_) {
       _count = 0; // the badge is cosmetic; never block the page on it
     }
@@ -214,3 +283,4 @@ class CartState extends ChangeNotifier {
 final catalogRepo = CatalogRepository();
 final cartRepo = CartRepository();
 final domainCartRepo = DomainCartRepository();
+final hostingCartRepo = HostingCartRepository();
