@@ -101,23 +101,38 @@ async function handleHosting(admin: ReturnType<typeof createClient>, orderId: st
   // Only the first delivery wins: Stripe may send the same event again, and we must not create twice.
   const { data: claimed } = await admin.from("hosting_orders")
     .update({ status: "paid", paid_at: new Date().toISOString() })
-    .eq("id", orderId).eq("status", "pending").select("id, user_id").maybeSingle();
+    .eq("id", orderId).eq("status", "pending").select("id, user_id, tenant_id, currency").maybeSingle();
   if (!claimed) return new Response("already handled");
 
   const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
-  const { data: items } = await admin.from("hosting_order_items").select("id, domain, package_type_id, plan_name, months").eq("order_id", orderId);
-  for (const item of (items ?? []) as HostingItem[]) {
+  const { data: items } = await admin.from("hosting_order_items").select("id, domain, package_type_id, plan_name, months, price").eq("order_id", orderId);
+  for (const item of (items ?? []) as (HostingItem & { price: number })[]) {
+    let status: "test_registered" | "registered" | "failed";
+    let note: string | null = null;
     if (!live) {
       console.log(`TEST MODE: would create ${item.plan_name} for ${item.domain} for user ${claimed.user_id}`);
-      await admin.from("hosting_order_items").update({ status: "test_registered", note: "test mode: not sent to 20i" }).eq("id", item.id);
-      continue;
+      status = "test_registered";
+      note = "test mode: not sent to 20i";
+    } else {
+      try {
+        const packageId = await createHostingWith20i(admin, claimed.user_id, item);
+        status = "registered";
+        note = `20i package ${packageId}`;
+      } catch (e) {
+        console.error("hosting creation failed", item.domain, e);
+        status = "failed";
+        note = String((e as Error).message ?? e).slice(0, 300);
+      }
     }
-    try {
-      const packageId = await createHostingWith20i(admin, claimed.user_id, item);
-      await admin.from("hosting_order_items").update({ status: "registered", note: `20i package ${packageId}` }).eq("id", item.id);
-    } catch (e) {
-      console.error("hosting creation failed", item.domain, e);
-      await admin.from("hosting_order_items").update({ status: "failed", note: String((e as Error).message ?? e).slice(0, 300) }).eq("id", item.id);
+    await admin.from("hosting_order_items").update({ status, note }).eq("id", item.id);
+    // The reseller's company now owns this package: it shows under Purchased Hosting, ready to assign to a client.
+    // (Orders made before tenant_id existed have none, so they get no row.)
+    if (claimed.tenant_id) {
+      const { error } = await admin.from("purchased_hosting").insert({
+        tenant_id: claimed.tenant_id, order_item_id: item.id, plan_name: item.plan_name, package_type_id: item.package_type_id,
+        months: item.months, domain: item.domain, unit_price: item.price, currency: claimed.currency, status, note,
+      });
+      if (error) console.error("purchased_hosting insert failed", item.domain, error.message);
     }
   }
   await admin.from("hosting_cart_items").delete().eq("user_id", claimed.user_id).in("domain", (items ?? []).map((i) => i.domain));

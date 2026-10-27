@@ -40,6 +40,7 @@ List<_NavGroup> _navFor(AppState s) => s.isSuperAdmin
         _NavItem('Purchased Domains', Icons.language, Routes.purchasedDomains),
         _NavItem('VPS', Icons.dns_outlined, Routes.orderVps),
         _NavItem('Web Hosting', Icons.cloud_outlined, Routes.orderHosting),
+        _NavItem('Purchased Hosting', Icons.cloud_done_outlined, Routes.purchasedHosting),
         _NavItem('SSL Certificates', Icons.lock_outline, Routes.orderSsl),
         _NavItem('WordPress Hosting', Icons.web, Routes.orderWordpress),
       ]),

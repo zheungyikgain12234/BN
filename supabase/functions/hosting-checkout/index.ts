@@ -1,5 +1,6 @@
 // Starts a Stripe Checkout payment for the signed-in user's hosting basket.
 //   body: { returnUrl: "https://app.biznesthub.net/cart" }
+//   body also carries tenantId: the company buying (must be a reseller admin of it).
 //   returns: { url }  (the Stripe-hosted payment page; the app redirects the browser to it)
 //
 // Same flow as domain-checkout: read the basket -> save it as a pending order -> create a Stripe Checkout
@@ -37,8 +38,12 @@ Deno.serve(async (req) => {
     const { data: adminRow } = await admin.from("app_admins").select("user_id").eq("user_id", user.id).maybeSingle();
     if (adminRow) return json({ error: "Super admins cannot purchase" }, 403);
 
-    const { returnUrl } = await req.json().catch(() => ({}));
+    const { returnUrl, tenantId } = await req.json().catch(() => ({}));
     if (typeof returnUrl !== "string" || !/^https?:\/\//.test(returnUrl)) return json({ error: "returnUrl required" }, 400);
+    // Only a reseller admin of the company may buy for it (same rule as software and domains).
+    if (typeof tenantId !== "string") return json({ error: "tenantId required" }, 400);
+    const { data: allowed } = await supabase.rpc("can_buy_for_tenant", { t: tenantId });
+    if (allowed !== true) return json({ error: "Only a reseller admin can purchase hosting" }, 403);
 
     // The basket is read with the caller's own token, so row-level security limits it to their rows.
     const { data: basket, error: cartErr } = await supabase.from("hosting_cart_items").select("package_type_id, months, domain");
@@ -58,7 +63,7 @@ Deno.serve(async (req) => {
     const total = cart.reduce((s, i) => s + i.price, 0);
 
     const { data: order, error: orderErr } = await admin.from("hosting_orders")
-      .insert({ user_id: user.id, currency, total }).select("id").single();
+      .insert({ user_id: user.id, tenant_id: tenantId, currency, total }).select("id").single();
     if (orderErr) throw orderErr;
     const { error: itemsErr } = await admin.from("hosting_order_items")
       .insert(cart.map((i) => ({ order_id: order.id, package_type_id: i.package_type_id, plan_name: i.plan_name, months: i.months, domain: i.domain, price: i.price })));
