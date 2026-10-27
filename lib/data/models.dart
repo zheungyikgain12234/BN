@@ -308,3 +308,79 @@ class HostingOrderItem {
         note: j['note'] as String?,
       );
 }
+
+/// What the reseller charges for one VPS plan over one billing period (Master Data > VPS prices).
+class VpsPrice {
+  const VpsPrice({required this.vpsType, required this.planName, required this.months, required this.price, required this.currency});
+  final String vpsType, planName, currency;
+  final int months;
+  final double price;
+
+  String get label => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
+
+  factory VpsPrice.fromJson(Map<String, dynamic> j) => VpsPrice(
+        vpsType: j['vps_type'] as String,
+        planName: j['plan_name'] as String,
+        months: j['months'] as int,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+/// An operating system the reseller can choose for a VPS (Master Data > VPS operating systems).
+class VpsOs {
+  const VpsOs({required this.label, required this.code});
+  final String label, code;
+
+  factory VpsOs.fromJson(Map<String, dynamic> j) => VpsOs(label: j['label'] as String, code: j['code'] as String);
+}
+
+class VpsCartItem {
+  const VpsCartItem({required this.id, required this.vpsType, required this.planName, required this.months, required this.osLabel, required this.location, required this.serverName, required this.price, required this.currency});
+  final String id, vpsType, planName, osLabel, location, serverName, currency;
+  final int months;
+  final double price;
+
+  factory VpsCartItem.fromJson(Map<String, dynamic> j) => VpsCartItem(
+        id: j['id'] as String,
+        vpsType: j['vps_type'] as String,
+        planName: j['plan_name'] as String,
+        months: j['months'] as int,
+        osLabel: j['os_label'] as String,
+        location: j['location'] as String,
+        serverName: j['server_name'] as String,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+/// A paid (or pending) VPS checkout, with one line per server.
+class VpsOrder {
+  const VpsOrder({required this.id, required this.status, required this.currency, required this.total, required this.items});
+  final String id, status, currency;
+  final double total;
+  final List<VpsOrderItem> items;
+
+  factory VpsOrder.fromJson(Map<String, dynamic> j) => VpsOrder(
+        id: j['id'] as String,
+        status: j['status'] as String,
+        currency: j['currency'] as String,
+        total: (j['total'] as num).toDouble(),
+        items: [for (final i in (j['vps_order_items'] as List? ?? const [])) VpsOrderItem.fromJson(i as Map<String, dynamic>)],
+      );
+}
+
+class VpsOrderItem {
+  const VpsOrderItem({required this.planName, required this.serverName, required this.months, required this.status, this.note});
+  final String planName, serverName, status;
+  final int months;
+  final String? note;
+
+  factory VpsOrderItem.fromJson(Map<String, dynamic> j) => VpsOrderItem(
+        planName: j['plan_name'] as String,
+        serverName: j['server_name'] as String,
+        months: j['months'] as int,
+        status: j['status'] as String,
+        note: j['note'] as String?,
+      );
+}

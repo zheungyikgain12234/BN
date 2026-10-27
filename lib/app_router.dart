@@ -21,6 +21,8 @@ import 'features/domain/domain_search_api_screen.dart';
 import 'features/domain/domain_search_screen.dart';
 import 'features/hosting/hosting_embed_test_screen.dart';
 import 'features/hosting/hosting_screen.dart';
+import 'features/vps/purchased_vps_screen.dart';
+import 'features/vps/vps_screen.dart';
 import 'features/hosting/purchased_hosting_screen.dart';
 import 'features/domain/purchased_domains_screen.dart';
 import 'features/shell/app_shell.dart';
@@ -65,6 +67,7 @@ class Routes {
   static const domainSearchApi = '/domain-search-api';
   static const purchasedDomains = '/purchased-domains';
   static const purchasedHosting = '/purchased-hosting';
+  static const purchasedVps = '/purchased-vps';
   static const orderVps = '/order-vps';
   static const orderHosting = '/order-hosting';
   static const orderSsl = '/order-ssl';
@@ -116,7 +119,6 @@ final router = GoRouter(
         GoRoute(path: Routes.adminMasters, builder: (_, _) => const MastersScreen()),
         for (final e in const {
           Routes.domainSearch: 'Domain Search',
-          Routes.orderVps: 'VPS',
           Routes.orderSsl: 'SSL Certificates',
           Routes.orderWordpress: 'WordPress Hosting',
         }.entries)
@@ -125,6 +127,8 @@ final router = GoRouter(
         GoRoute(path: Routes.orderHosting, builder: (_, _) => const HostingScreen()),
         GoRoute(path: Routes.purchasedDomains, builder: (_, _) => const PurchasedDomainsScreen()),
         GoRoute(path: Routes.purchasedHosting, builder: (_, _) => const PurchasedHostingScreen()),
+        GoRoute(path: Routes.orderVps, builder: (_, _) => const VpsScreen()),
+        GoRoute(path: Routes.purchasedVps, builder: (_, _) => const PurchasedVpsScreen()),
         GoRoute(path: Routes.adminCompanies, builder: (_, _) => const CompaniesScreen()),
         GoRoute(path: Routes.adminUsers, builder: (_, _) => const UsersScreen()),
         GoRoute(path: Routes.hostingTest, builder: (_, _) => const HostingEmbedTestScreen()),

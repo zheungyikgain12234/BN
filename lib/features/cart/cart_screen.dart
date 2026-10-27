@@ -419,6 +419,127 @@ class _HostingCartState extends State<_HostingCart> {
   }
 }
 
+/// VPS servers added from the VPS page; paid with Stripe like the domain and hosting baskets.
+class _VpsCart extends StatefulWidget {
+  const _VpsCart();
+
+  @override
+  State<_VpsCart> createState() => _VpsCartState();
+}
+
+class _VpsCartState extends State<_VpsCart> {
+  List<VpsCartItem>? _items;
+  List<VpsOrder> _orders = const [];
+  Object? _error;
+  bool _paying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _error = null);
+    try {
+      final items = await vpsCartRepo.items();
+      // Orders are secondary: if their table isn't created yet the basket must still work.
+      final orders = await vpsCartRepo.orders().catchError((_) => <VpsOrder>[]);
+      if (mounted) setState(() { _items = items; _orders = orders; });
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    try {
+      await action();
+      await _load();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
+  /// Sends the browser to Stripe's payment page; Stripe returns here afterwards.
+  Future<void> _checkout() async {
+    setState(() => _paying = true);
+    try {
+      final url = await vpsCartRepo.startCheckout('${Uri.base.origin}/#${Routes.cart}');
+      web.window.location.href = url;
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _paying = false);
+    }
+  }
+
+  String _months(int m) => '$m ${m == 1 ? 'month' : 'months'}';
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) return ErrorRetry(error: _error!, onRetry: _load);
+    final items = _items;
+    if (items == null) return const Center(child: CircularProgressIndicator());
+    final byCurrency = <String, double>{};
+    for (final i in items) {
+      byCurrency.update(i.currency, (v) => v + i.price, ifAbsent: () => i.price);
+    }
+    return ListView(children: [
+      Row(children: [
+        OutlinedButton.icon(onPressed: () => context.go(Routes.orderVps), icon: const Icon(Icons.dns_outlined, size: 18), label: const Text('Browse VPS plans')),
+        const SizedBox(width: 8),
+        if (items.isNotEmpty)
+          TextButton.icon(onPressed: () => _run(vpsCartRepo.clear), icon: const Icon(Icons.remove_shopping_cart_outlined, size: 18, color: C.error), label: const Text('Clear', style: TextStyle(color: C.error))),
+      ]),
+      const SizedBox(height: 12),
+      if (items.isEmpty) AppCard(child: Text('No VPS in your basket.', style: T.bodyMd)),
+      for (final i in items)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: AppCard(
+            child: Row(children: [
+              const Icon(Icons.dns_outlined, color: C.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(child: Text('${i.planName} · ${i.serverName}', style: T.headlineSm)),
+              Text(_months(i.months), style: T.bodyMd),
+              const SizedBox(width: 16),
+              Text('${i.currency} ${i.price.toStringAsFixed(2)}', style: T.labelLg),
+              IconButton(tooltip: 'Remove', icon: const Icon(Icons.delete_outline, size: 18, color: C.error), onPressed: () => _run(() => vpsCartRepo.remove(i.id))),
+            ]),
+          ),
+        ),
+      if (items.isNotEmpty)
+        AppCard(
+          child: Wrap(alignment: WrapAlignment.end, spacing: 24, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            Text('Total', style: T.labelMd.copyWith(color: C.secondary)),
+            for (final e in byCurrency.entries) Text('${e.key} ${e.value.toStringAsFixed(2)}', style: T.headlineSm.copyWith(color: C.primary)),
+            if (byCurrency.length > 1)
+              Text('Your basket mixes currencies; remove some to check out.', style: T.bodySm.copyWith(color: C.error))
+            else
+              PrimaryButton(label: _paying ? 'Opening Stripe...' : 'Pay with Stripe (test)', icon: Icons.lock_outline, expand: false, onPressed: _paying ? null : _checkout),
+          ]),
+        ),
+      if (_orders.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        Row(children: [
+          Text('Recent orders', style: T.headlineSm),
+          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh, size: 18), onPressed: _load),
+        ]),
+        for (final o in _orders)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: AppCard(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${o.currency} ${o.total.toStringAsFixed(2)} · ${o.status}', style: T.labelLg),
+                for (final i in o.items) Text('${i.planName} · ${i.serverName} · ${_months(i.months)} · ${i.note ?? i.status}', style: T.bodySm),
+              ]),
+            ),
+          ),
+      ],
+    ]);
+  }
+}
+
 /// Cart page: our software cart, plus the hosting panel's own basket (domains, VPS, hosting, SSL).
 class CartScreen extends StatelessWidget {
   const CartScreen({super.key});
@@ -426,19 +547,20 @@ class CartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('My cart', style: T.headlineLg),
           const SizedBox(height: 8),
-          const TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [Tab(text: 'Software'), Tab(text: 'Domains'), Tab(text: 'Web hosting'), Tab(text: 'Hosting orders')]),
+          const TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [Tab(text: 'Software'), Tab(text: 'Domains'), Tab(text: 'Web hosting'), Tab(text: 'VPS'), Tab(text: 'Hosting orders')]),
           const SizedBox(height: 12),
           Expanded(
             child: TabBarView(children: [
               const _SoftwareCart(),
               const _DomainCart(),
               const _HostingCart(),
+              const _VpsCart(),
               PanelEmbedScreen(title: 'Hosting orders', url: '${Env.panelBase}/checkout', embedded: true),
             ]),
           ),

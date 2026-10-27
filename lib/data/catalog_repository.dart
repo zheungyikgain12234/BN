@@ -264,6 +264,95 @@ class HostingCartRepository {
   }
 }
 
+/// VPS servers in the basket (one row per user + server name). Prices are re-read from Master Data, like hosting.
+class VpsCartRepository {
+  Future<List<VpsPrice>> prices() async {
+    final rows = await sb.from('vps_plan_prices').select().order('plan_name').order('months');
+    return rows.map<VpsPrice>(VpsPrice.fromJson).toList();
+  }
+
+  /// The panel shop's VPS plans and operating systems, read through the stackcp-sso login (for the Master Data pickers).
+  /// The plan price is the shop's own price: a hint only, the reseller price is set in Master Data.
+  Future<({List<({String code, String label, int months, double price})> plans, List<({String code, String label, bool paid})> os})> panelCatalogue() async {
+    final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
+    final data = res.data as Map?;
+    if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
+    if (data?['sso'] != true) throw '${data?['reason'] ?? 'Panel login failed'}';
+    final c = (data!['catalogue'] as Map?) ?? const {};
+    return (
+      plans: [
+        for (final p in (c['vpsPlans'] as List? ?? const []))
+          (code: '${p['code']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 1, price: (p['price'] as num?)?.toDouble() ?? 0),
+      ],
+      os: [
+        for (final o in (c['vpsOs'] as List? ?? const [])) (code: '${o['code']}', label: '${o['label']}', paid: o['paid'] == true),
+      ],
+    );
+  }
+
+  Future<List<VpsOs>> osOptions() async {
+    final rows = await sb.from('vps_os_options').select().order('label');
+    return rows.map<VpsOs>(VpsOs.fromJson).toList();
+  }
+
+  Future<List<VpsCartItem>> items() async {
+    final rows = await sb.from('vps_cart_items').select().order('created_at');
+    final items = rows.map<VpsCartItem>(VpsCartItem.fromJson).toList();
+    // Show today's Master Data price, the same one vps-checkout charges (the saved price may be stale).
+    final prices = await this.prices();
+    return [
+      for (final i in items)
+        () {
+          final p = prices.where((x) => x.vpsType == i.vpsType && x.months == i.months).firstOrNull;
+          return p == null
+              ? i
+              : VpsCartItem(id: i.id, vpsType: i.vpsType, planName: p.planName, months: i.months, osLabel: i.osLabel, location: i.location, serverName: i.serverName, price: p.price, currency: p.currency);
+        }(),
+    ];
+  }
+
+  Future<void> add({required String serverName, required VpsPrice plan, required VpsOs os, required String location}) async {
+    await sb.from('vps_cart_items').upsert({
+      'server_name': serverName,
+      'vps_type': plan.vpsType,
+      'plan_name': plan.planName,
+      'months': plan.months,
+      'os_code': os.code,
+      'os_label': os.label,
+      'location': location,
+      'price': plan.price,
+      'currency': plan.currency,
+    }, onConflict: 'user_id,server_name');
+    await CartState.instance.refresh();
+  }
+
+  Future<void> remove(String id) async {
+    await sb.from('vps_cart_items').delete().eq('id', id);
+    await CartState.instance.refresh();
+  }
+
+  Future<void> clear() async {
+    await sb.from('vps_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
+    await CartState.instance.refresh();
+  }
+
+  /// Saves the basket as an order and returns the Stripe payment page to send the browser to.
+  Future<String> startCheckout(String returnUrl) async {
+    final tenant = AppState.instance.tenant;
+    if (tenant == null) throw 'Select a company first';
+    final res = await sb.functions.invoke('vps-checkout', body: {'returnUrl': returnUrl, 'tenantId': tenant.id});
+    final data = res.data as Map?;
+    final url = data?['url'] as String?;
+    if (url == null) throw '${data?['error'] ?? 'Could not start checkout'}';
+    return url;
+  }
+
+  Future<List<VpsOrder>> orders() async {
+    final rows = await sb.from('vps_orders').select('*, vps_order_items(plan_name, server_name, months, status, note)').order('created_at', ascending: false).limit(10);
+    return rows.map<VpsOrder>(VpsOrder.fromJson).toList();
+  }
+}
+
 class CartState extends ChangeNotifier {
   CartState._();
   static final instance = CartState._();
@@ -276,7 +365,8 @@ class CartState extends ChangeNotifier {
       final rows = await sb.from('cart_items').select('quantity');
       final domains = await sb.from('domain_cart_items').select('id').catchError((_) => <Map<String, dynamic>>[]); // table not created yet
       final hosting = await sb.from('hosting_cart_items').select('id').catchError((_) => <Map<String, dynamic>>[]); // table not created yet
-      _count = rows.fold<int>(0, (sum, r) => sum + (r['quantity'] as int)) + domains.length + hosting.length;
+      final vps = await sb.from('vps_cart_items').select('id').catchError((_) => <Map<String, dynamic>>[]); // table not created yet
+      _count = rows.fold<int>(0, (sum, r) => sum + (r['quantity'] as int)) + domains.length + hosting.length + vps.length;
     } catch (_) {
       _count = 0; // the badge is cosmetic; never block the page on it
     }
@@ -288,3 +378,4 @@ final catalogRepo = CatalogRepository();
 final cartRepo = CartRepository();
 final domainCartRepo = DomainCartRepository();
 final hostingCartRepo = HostingCartRepository();
+final vpsCartRepo = VpsCartRepository();

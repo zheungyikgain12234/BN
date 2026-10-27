@@ -96,6 +96,33 @@ const masterDefs = <MasterDef>[
       MasterField('currency', 'Currency', required: true, hint: 'SGD'),
     ],
   ),
+  MasterDef(
+    table: 'vps_plan_prices',
+    title: 'VPS prices',
+    singular: 'VPS price',
+    orderBy: 'plan_name',
+    usageKind: '',
+    valueKey: 'id',
+    fields: [
+      MasterField('plan_name', 'Plan name', required: true, hint: '1 Core Unmanaged VPS'),
+      MasterField('vps_type', '20i VPS type', required: true, hint: 'Pick from 20i, or vps-a'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '1'),
+      MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '25.00'),
+      MasterField('currency', 'Currency', required: true, hint: 'SGD'),
+    ],
+  ),
+  MasterDef(
+    table: 'vps_os_options',
+    title: 'VPS operating systems',
+    singular: 'operating system',
+    orderBy: 'label',
+    usageKind: '',
+    valueKey: 'id',
+    fields: [
+      MasterField('label', 'Name', required: true, hint: 'Ubuntu 22.04'),
+      MasterField('code', '20i OS code', required: true, hint: 'Pick from 20i, or ubuntu22.04'),
+    ],
+  ),
 ];
 
 class MasterRepository {

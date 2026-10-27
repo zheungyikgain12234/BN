@@ -139,6 +139,86 @@ async function handleHosting(admin: ReturnType<typeof createClient>, orderId: st
   return new Response("ok");
 }
 
+type VpsItem = { id: string; vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string };
+
+// 20i: POST /reseller/{id}/addVPS orders the server and CHARGES THE 20i ACCOUNT BALANCE immediately; with too little
+// credit it fails and nothing is created. Body per the 20i docs: type ("vps-e" style), periodMonths, options.os,
+// configuration.{Name, location ("dc_location-lhr" = UK, "dc_location-dfw" = USA)}, forUser. UNVERIFIED against a
+// live reply: the exact type codes of your plans (vps:a in the shop is assumed to be "vps-a") and whether every OS
+// code is accepted. Success is expected to return the new VPS id as {"result": <id>}, like addWeb.
+async function createVpsWith20i(admin: ReturnType<typeof createClient>, userId: string, item: VpsItem): Promise<string> {
+  const key = Deno.env.get("TWENTYI_API_KEY");
+  if (!key) throw new Error("TWENTYI_API_KEY is not set");
+  const reseller = Deno.env.get("TWENTYI_RESELLER_ID") ?? "*";
+
+  const { data: su } = await admin.from("stackcp_users").select("stack_user_id").eq("user_id", userId).maybeSingle();
+  const body: Record<string, unknown> = {
+    type: item.vps_type.startsWith("vps-") ? item.vps_type : `vps-${item.vps_type}`, // "a" and "vps-a" both work
+    periodMonths: item.months,
+    options: { os: item.os_code },
+    configuration: { Name: item.server_name, location: item.location },
+  };
+  if (su?.stack_user_id) body.forUser = su.stack_user_id;
+
+  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addVPS`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${btoa(key)}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  console.log("20i addVPS", item.server_name, res.status, text.slice(0, 500));
+  if (!res.ok) throw new Error(`20i ${res.status}: ${text.slice(0, 250)}`);
+  let vpsId: unknown;
+  try { vpsId = JSON.parse(text)?.result; } catch { /* handled below */ }
+  if (typeof vpsId !== "number" && !(typeof vpsId === "string" && vpsId !== "")) {
+    throw new Error(`20i did not return a VPS id: ${text.slice(0, 200)}`);
+  }
+  return String(vpsId);
+}
+
+// Same shape as the hosting branch, on the vps_* tables.
+async function handleVps(admin: ReturnType<typeof createClient>, orderId: string): Promise<Response> {
+  // Only the first delivery wins: Stripe may send the same event again, and we must not order twice.
+  const { data: claimed } = await admin.from("vps_orders")
+    .update({ status: "paid", paid_at: new Date().toISOString() })
+    .eq("id", orderId).eq("status", "pending").select("id, user_id, tenant_id, currency").maybeSingle();
+  if (!claimed) return new Response("already handled");
+
+  const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
+  const { data: items } = await admin.from("vps_order_items")
+    .select("id, vps_type, plan_name, months, os_code, os_label, location, server_name, price").eq("order_id", orderId);
+  for (const item of (items ?? []) as (VpsItem & { price: number })[]) {
+    let status: "test_registered" | "registered" | "failed";
+    let note: string | null = null;
+    if (!live) {
+      console.log(`TEST MODE: would order ${item.plan_name} "${item.server_name}" for user ${claimed.user_id}`);
+      status = "test_registered";
+      note = "test mode: not sent to 20i";
+    } else {
+      try {
+        const vpsId = await createVpsWith20i(admin, claimed.user_id, item);
+        status = "registered";
+        note = `20i VPS ${vpsId}`;
+      } catch (e) {
+        console.error("vps creation failed", item.server_name, e);
+        status = "failed";
+        note = String((e as Error).message ?? e).slice(0, 300);
+      }
+    }
+    await admin.from("vps_order_items").update({ status, note }).eq("id", item.id);
+    if (claimed.tenant_id) {
+      const { error } = await admin.from("purchased_vps").insert({
+        tenant_id: claimed.tenant_id, order_item_id: item.id, plan_name: item.plan_name, vps_type: item.vps_type,
+        months: item.months, os_label: item.os_label, location: item.location, server_name: item.server_name,
+        unit_price: item.price, currency: claimed.currency, status, note,
+      });
+      if (error) console.error("purchased_vps insert failed", item.server_name, error.message);
+    }
+  }
+  await admin.from("vps_cart_items").delete().eq("user_id", claimed.user_id).in("server_name", (items ?? []).map((i) => i.server_name));
+  return new Response("ok");
+}
+
 Deno.serve(async (req) => {
   const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
   if (!secret) return new Response("not configured", { status: 500 });
@@ -156,6 +236,7 @@ Deno.serve(async (req) => {
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   if (session.metadata?.kind === "hosting") return handleHosting(admin, orderId);
+  if (session.metadata?.kind === "vps") return handleVps(admin, orderId);
 
   // Only the first delivery wins: Stripe may send the same event again, and we must not register twice.
   const { data: claimed } = await admin.from("domain_orders")

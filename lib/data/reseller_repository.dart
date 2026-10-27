@@ -89,6 +89,35 @@ class PurchasedHosting {
   double? get profit => sellPrice == null ? null : sellPrice! - unitPrice;
 }
 
+/// One purchased VPS. Assigned when [clientId] is set; [unitPrice] is what the reseller paid.
+class PurchasedVps {
+  PurchasedVps.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as String,
+        planName = j['plan_name'] as String,
+        serverName = j['server_name'] as String,
+        osLabel = j['os_label'] as String,
+        location = j['location'] as String,
+        months = j['months'] as int,
+        unitPrice = (j['unit_price'] as num).toDouble(),
+        currency = (j['currency'] ?? '') as String,
+        status = j['status'] as String,
+        note = j['note'] as String?,
+        purchasedAt = DateTime.parse(j['purchased_at'] as String),
+        clientId = j['client_id'] as String?,
+        clientName = ((j['clients'] as Map<String, dynamic>?)?['name'] ?? '') as String,
+        sellPrice = (j['sell_price'] as num?)?.toDouble();
+  final String id, planName, serverName, osLabel, location, currency, status, clientName;
+  final String? clientId, note;
+  final int months;
+  final double unitPrice;
+  final double? sellPrice;
+  final DateTime purchasedAt;
+
+  bool get assigned => clientId != null;
+  bool get failed => status == 'failed';
+  double? get profit => sellPrice == null ? null : sellPrice! - unitPrice;
+}
+
 /// A cart line's choice at checkout: assign now to [clientId] at [sellPrice] per license, or leave both null.
 class CheckoutLine {
   const CheckoutLine(this.cartItemId, {this.clientId, this.sellPrice});
@@ -144,6 +173,14 @@ class ResellerRepository {
 
   Future<void> assignHosting(String hostingId, String? clientId, double? sellPrice) =>
       sb.rpc('assign_hosting', params: {'p_hosting': hostingId, 'p_client': clientId, 'p_sell_price': sellPrice});
+
+  Future<List<PurchasedVps>> purchasedVps(String tenantId) async {
+    final rows = await sb.from('purchased_vps').select('*, clients(name)').eq('tenant_id', tenantId).order('purchased_at', ascending: false);
+    return rows.map<PurchasedVps>(PurchasedVps.fromJson).toList();
+  }
+
+  Future<void> assignVps(String vpsId, String? clientId, double? sellPrice) =>
+      sb.rpc('assign_vps', params: {'p_vps': vpsId, 'p_client': clientId, 'p_sell_price': sellPrice});
 
   Future<void> checkout(String tenantId, List<CheckoutLine> lines) =>
       sb.rpc('checkout', params: {'p_tenant': tenantId, 'p_lines': [for (final l in lines) l.toJson()]});

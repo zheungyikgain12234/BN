@@ -173,6 +173,42 @@ async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): 
   return out;
 }
 
+// Reads the panel shop's VPS plans and operating systems with the logged-in session (the same two JSON calls the
+// panel's own order-vps page makes). Not a documented 20i API: the shape may change if the panel does, so every field
+// is read defensively. Used by Master Data to offer "Pick from 20i" for VPS prices and operating systems.
+async function fetchVpsCatalogue(jar: Map<string, string>) {
+  const get = async (path: string) => {
+    const res = await fetch(`${PANEL}${path}`, {
+      headers: { Cookie: cookieHeader(jar), "X-Requested-With": "XMLHttpRequest", Accept: "application/json", Referer: `${PANEL}/order-vps` },
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`panel ${path} replied ${res.status}: ${text.slice(0, 200)}`);
+    return JSON.parse(text);
+  };
+
+  const products = await get("/a/catalogue/product");
+  const plans = (Array.isArray(products) ? products : [])
+    .filter((p: any) => typeof p?.code === "string" && /^vps:[a-z0-9]+$/i.test(p.code) && !p.discontinued)
+    .map((p: any) => ({
+      code: String(p.code),                                        // vps:a
+      label: String(p.label ?? p.code),                            // 1 Core Unmanaged VPS
+      months: Number(p.pricing?.[0]?.periodMonths ?? 1),
+      price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop's price, only a hint
+    }));
+
+  // The OS list is per product; the first plan's list is the same set the order page offers.
+  let os: { code: string; label: string; paid: boolean }[] = [];
+  if (plans.length) {
+    const reply = await get(`/n/catalogue/product/${encodeURIComponent(plans[0].code)}/vpsOSOptions`);
+    const pick = (list: any, paid: boolean) => (Array.isArray(list) ? list : [])
+      .filter((o: any) => typeof o?.code === "string")
+      .map((o: any) => ({ code: String(o.code), label: String(o.label ?? o.code), paid }));
+    os = [...pick(reply?.free, false), ...pick(reply?.paid, true)];
+  }
+  console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems");
+  return { vpsPlans: plans, vpsOs: os };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -218,7 +254,12 @@ Deno.serve(async (req) => {
     if (!jar) return fallback("panel login failed");
     // Optional: push items into the panel basket in this same session, then hand the session to the browser.
     const basket = Array.isArray(body?.basket) && body.basket.length ? await addToPanelBasket(jar, body.basket as BasketItem[]) : undefined;
-    return json({ sso: true, cookies: [...jar].map(([name, value]) => ({ name, value })), basket });
+    // Optional: read the shop catalogue (VPS plans and operating systems) in this same session.
+    let catalogue;
+    if (body?.catalogue) {
+      try { catalogue = await fetchVpsCatalogue(jar); } catch (e) { return json({ sso: true, cookies: [], catalogueError: String(e) }); }
+    }
+    return json({ sso: true, cookies: [...jar].map(([name, value]) => ({ name, value })), basket, catalogue });
   } catch (e) {
     return fallback(String(e));
   }

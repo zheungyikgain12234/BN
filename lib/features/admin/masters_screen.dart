@@ -171,6 +171,48 @@ class _MasterDialogState extends State<_MasterDialog> {
     super.dispose();
   }
 
+  /// Which field gets a "Pick from 20i" button, for the master tables whose values 20i can supply.
+  String? get _pickerField => switch (widget.def.table) {
+        'hosting_plan_prices' => 'package_type_id',
+        'vps_plan_prices' => 'vps_type',
+        'vps_os_options' => 'code',
+        _ => null,
+      };
+
+  /// VPS prices / operating systems: choose from the panel shop's list (read through the panel login).
+  Future<void> _pickVps() async {
+    try {
+      final cat = await vpsCartRepo.panelCatalogue();
+      if (!mounted) return;
+      final isPlan = widget.def.table == 'vps_plan_prices';
+      final options = isPlan
+          ? [for (final p in cat.plans) (code: p.code, label: p.label, hint: 'shop price ${p.price.toStringAsFixed(2)} / ${p.months} mo', months: p.months)]
+          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', months: 0)];
+      final chosen = await showDialog<({String code, String label, String hint, int months})>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: Text(isPlan ? 'VPS plans from 20i' : 'Operating systems from 20i'),
+          children: [
+            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
+            for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text('${o.label}  (${o.code}, ${o.hint})')),
+          ],
+        ),
+      );
+      if (chosen == null) return;
+      if (isPlan) {
+        // The shop code vps:a is the 20i type vps-a.
+        _text['vps_type']!.text = chosen.code.replaceFirst('vps:', 'vps-');
+        if (_text['plan_name']!.text.trim().isEmpty) _text['plan_name']!.text = chosen.label;
+        if (_text['months']!.text.trim().isEmpty) _text['months']!.text = '${chosen.months}';
+      } else {
+        _text['code']!.text = chosen.code;
+        if (_text['label']!.text.trim().isEmpty) _text['label']!.text = chosen.label;
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   /// Hosting prices: choose the plan from 20i's own list instead of typing its id.
   Future<void> _pick20iPlan() async {
     try {
@@ -258,8 +300,12 @@ class _MasterDialogState extends State<_MasterDialog> {
                           decoration: fieldDecoration(hint: f.hint),
                           validator: f.required ? (v) => (v == null || v.trim().isEmpty) ? '${f.label} is required' : null : null,
                         ),
-                        if (f.key == 'package_type_id')
-                          TextButton.icon(onPressed: _pick20iPlan, icon: const Icon(Icons.cloud_download_outlined, size: 18), label: const Text('Pick from 20i')),
+                        if (f.key == _pickerField)
+                          TextButton.icon(
+                            onPressed: def.table == 'hosting_plan_prices' ? _pick20iPlan : _pickVps,
+                            icon: const Icon(Icons.cloud_download_outlined, size: 18),
+                            label: const Text('Pick from 20i'),
+                          ),
                       ]),
               ),
               const SizedBox(height: 14),
