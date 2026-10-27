@@ -44,14 +44,27 @@ Deno.serve(async (req) => {
     if (typeof returnUrl !== "string" || !/^https?:\/\//.test(returnUrl)) return json({ error: "returnUrl required" }, 400);
 
     // The cart is read with the caller's own token, so row-level security limits it to their rows.
-    const { data: cart, error: cartErr } = await supabase.from("domain_cart_items").select("domain, years, price, currency");
+    const { data: basket, error: cartErr } = await supabase.from("domain_cart_items").select("domain, years");
     if (cartErr) throw cartErr;
-    if (!cart?.length) return json({ error: "Your domain basket is empty" }, 400);
-    const currency = cart[0].currency as string;
-    if (cart.some((i) => i.currency !== currency)) return json({ error: "Basket mixes currencies; pay for them separately" }, 400);
-    const total = cart.reduce((s, i) => s + Number(i.price), 0);
+    if (!basket?.length) return json({ error: "Your domain basket is empty" }, 400);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // The price saved in the basket is never trusted (it can be stale or edited by the browser).
+    // Every line is re-priced from Master Data (domain_tld_prices) right now.
+    const { data: prices, error: priceErr } = await admin.from("domain_tld_prices").select("tld, years, price, currency");
+    if (priceErr) throw priceErr;
+    const cart: { domain: string; years: number; price: number; currency: string }[] = [];
+    for (const b of basket) {
+      const tld = String(b.domain).toLowerCase().split(".").slice(1).join("."); // mysite.co.uk -> co.uk
+      const p = prices?.find((x) => x.tld === tld && x.years === b.years);
+      if (!p) return json({ error: `No price is set for ${b.domain} (${b.years} year(s)). Remove it from the basket.` }, 400);
+      cart.push({ domain: b.domain, years: b.years, price: Number(p.price), currency: p.currency });
+    }
+    const currency = cart[0].currency;
+    if (cart.some((i) => i.currency !== currency)) return json({ error: "Basket mixes currencies; pay for them separately" }, 400);
+    const total = cart.reduce((s, i) => s + i.price, 0);
+
     const { data: order, error: orderErr } = await admin.from("domain_orders")
       .insert({ user_id: user.id, currency, total }).select("id").single();
     if (orderErr) throw orderErr;

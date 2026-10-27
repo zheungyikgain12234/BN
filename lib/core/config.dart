@@ -1,9 +1,10 @@
-/// Defaults point at the Biznest Supabase project. Override with:
-/// flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
-/// (The publishable key is public by design; never put a service-role or secret key here.)
+/// Supabase credentials come from supabase.env.json (git-ignored; copy supabase.env.example.json):
+/// flutter run --dart-define-from-file=supabase.env.json
+/// flutter build web --dart-define-from-file=supabase.env.json
+/// Without it the app runs offline (UI only). Never put a service-role or secret key in that file.
 class Env {
-  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://noomyjgwxiqevchvopjy.supabase.co');
-  static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: 'sb_publishable_aAb6Tn2R_pNbUQOvljwoEw_DWe1EDOW');
+  static const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
   /// White-labelled hosting panel (embedded order pages and basket). Override: --dart-define=PANEL_BASE=https://cp.yourdomain.com
   static const panelBase = String.fromEnvironment('PANEL_BASE', defaultValue: 'https://cp.biznesthub.net');
 

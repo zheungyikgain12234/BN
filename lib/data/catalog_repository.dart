@@ -149,7 +149,17 @@ class DomainCartRepository {
 
   Future<List<DomainCartItem>> items() async {
     final rows = await sb.from('domain_cart_items').select().order('created_at');
-    return rows.map<DomainCartItem>(DomainCartItem.fromJson).toList();
+    final items = rows.map<DomainCartItem>(DomainCartItem.fromJson).toList();
+    // Show today's Master Data price, the same one domain-checkout charges (the saved price may be stale).
+    final prices = await this.prices();
+    return [
+      for (final i in items)
+        () {
+          final tld = i.domain.toLowerCase().split('.').skip(1).join('.');
+          final p = prices.where((x) => x.tld == tld && x.years == i.years).firstOrNull;
+          return p == null ? i : DomainCartItem(id: i.id, domain: i.domain, years: i.years, price: p.price, currency: p.currency);
+        }(),
+    ];
   }
 
   Future<void> add(String domain, DomainPrice p) async {

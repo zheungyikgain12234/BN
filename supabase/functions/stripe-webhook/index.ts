@@ -8,7 +8,10 @@
 //   STRIPE_WEBHOOK_SECRET        whsec_...
 //   DOMAIN_REGISTRATION_LIVE     "true" to really register with 20i. Anything else = TEST MODE:
 //                                the order is paid (in Stripe test money) but registration is only logged.
-//   TWENTYI_API_KEY              used once live registration is added
+//   TWENTYI_API_KEY              general API key (same one stackcp-sso uses)
+//   TWENTYI_RESELLER_ID          optional, default "*"
+//   TWENTYI_DEFAULT_CONTACT      JSON registrant details, see registerWith20i
+//   LIVE MODE SPENDS REAL 20i CREDIT. Keep DOMAIN_REGISTRATION_LIVE unset unless that is intended.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -27,9 +30,40 @@ async function validSignature(body: string, header: string, secret: string): Pro
 
 type Item = { id: string; domain: string; years: number };
 
-// The real 20i registration call is not added yet: it needs the request captured from the panel's Network tab.
-async function registerWith20i(_userId: string, _item: Item): Promise<void> {
-  throw new Error("live registration is not implemented yet");
+// 20i: POST /reseller/{id}/addDomain registers the domain and CHARGES THE 20i ACCOUNT BALANCE immediately.
+// With too little credit the call fails and nothing is registered.
+// The contact block is required by the registry. Until the app collects the customer's own details, a default
+// registrant comes from the TWENTYI_DEFAULT_CONTACT secret (JSON: organisation, name, address, telephone,
+// email, cc, pc, sp, city), with the customer's login email used when the secret has none.
+async function registerWith20i(admin: ReturnType<typeof createClient>, userId: string, email: string | null, item: Item): Promise<void> {
+  const key = Deno.env.get("TWENTYI_API_KEY");
+  if (!key) throw new Error("TWENTYI_API_KEY is not set");
+  const reseller = Deno.env.get("TWENTYI_RESELLER_ID") ?? "*";
+
+  let contact: Record<string, unknown>;
+  try {
+    contact = JSON.parse(Deno.env.get("TWENTYI_DEFAULT_CONTACT") ?? "");
+  } catch {
+    throw new Error("TWENTYI_DEFAULT_CONTACT is missing or not valid JSON");
+  }
+  if (!contact.email && email) contact.email = email;
+
+  // Attach the domain to the customer's own panel user, if they have one (created at first panel login).
+  const { data: su } = await admin.from("stackcp_users").select("stack_user_id").eq("user_id", userId).maybeSingle();
+
+  // years is required by 20i even though the docs example omits it ("Invalid years: 0" without it).
+  const body: Record<string, unknown> = { name: item.domain, years: item.years, contact };
+  if (su?.stack_user_id) body.stackUser = su.stack_user_id;
+
+  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addDomain`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${btoa(key)}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  console.log("20i addDomain", item.domain, res.status, text.slice(0, 500));
+  if (!res.ok) throw new Error(`20i ${res.status}: ${text.slice(0, 250)}`);
+  if (text.trim() === "false") throw new Error("20i refused the registration");
 }
 
 Deno.serve(async (req) => {
@@ -64,7 +98,7 @@ Deno.serve(async (req) => {
       continue;
     }
     try {
-      await registerWith20i(claimed.user_id, item);
+      await registerWith20i(admin, claimed.user_id, session.customer_details?.email ?? session.customer_email ?? null, item);
       await admin.from("domain_order_items").update({ status: "registered" }).eq("id", item.id);
     } catch (e) {
       console.error("registration failed", item.domain, e);
