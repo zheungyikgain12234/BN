@@ -145,23 +145,37 @@ Deno.serve(async (req) => {
   // Only the first delivery wins: Stripe may send the same event again, and we must not register twice.
   const { data: claimed } = await admin.from("domain_orders")
     .update({ status: "paid", paid_at: new Date().toISOString() })
-    .eq("id", orderId).eq("status", "pending").select("id, user_id").maybeSingle();
+    .eq("id", orderId).eq("status", "pending").select("id, user_id, tenant_id, currency").maybeSingle();
   if (!claimed) return new Response("already handled");
 
   const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
-  const { data: items } = await admin.from("domain_order_items").select("id, domain, years").eq("order_id", orderId);
-  for (const item of (items ?? []) as Item[]) {
+  const { data: items } = await admin.from("domain_order_items").select("id, domain, years, price").eq("order_id", orderId);
+  for (const item of (items ?? []) as (Item & { price: number })[]) {
+    let status: "test_registered" | "registered" | "failed";
+    let note: string | null = null;
     if (!live) {
       console.log(`TEST MODE: would register ${item.domain} for ${item.years} year(s) for user ${claimed.user_id}`);
-      await admin.from("domain_order_items").update({ status: "test_registered", note: "test mode: not sent to 20i" }).eq("id", item.id);
-      continue;
+      status = "test_registered";
+      note = "test mode: not sent to 20i";
+    } else {
+      try {
+        await registerWith20i(admin, claimed.user_id, session.customer_details?.email ?? session.customer_email ?? null, item);
+        status = "registered";
+      } catch (e) {
+        console.error("registration failed", item.domain, e);
+        status = "failed";
+        note = String((e as Error).message ?? e).slice(0, 300);
+      }
     }
-    try {
-      await registerWith20i(admin, claimed.user_id, session.customer_details?.email ?? session.customer_email ?? null, item);
-      await admin.from("domain_order_items").update({ status: "registered" }).eq("id", item.id);
-    } catch (e) {
-      console.error("registration failed", item.domain, e);
-      await admin.from("domain_order_items").update({ status: "failed", note: String((e as Error).message ?? e).slice(0, 300) }).eq("id", item.id);
+    await admin.from("domain_order_items").update({ status, note }).eq("id", item.id);
+    // The reseller's company now owns this domain: it shows under Purchased Domains, ready to assign to a client.
+    // (Orders made before tenant_id existed have none, so they get no row.)
+    if (claimed.tenant_id) {
+      const { error } = await admin.from("purchased_domains").insert({
+        tenant_id: claimed.tenant_id, order_item_id: item.id, domain: item.domain, years: item.years,
+        unit_price: item.price, currency: claimed.currency, status, note,
+      });
+      if (error) console.error("purchased_domains insert failed", item.domain, error.message);
     }
   }
 

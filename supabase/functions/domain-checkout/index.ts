@@ -2,6 +2,7 @@
 //   body: { returnUrl: "https://app.biznesthub.net/cart" }
 //   returns: { url }  (the Stripe-hosted payment page; the app redirects the browser to it)
 //
+//   body also carries tenantId: the company buying (must be a reseller admin of it).
 // Flow: read the cart -> save it as a pending order -> create a Stripe Checkout Session.
 // The order only becomes "paid" in stripe-webhook, never from the browser.
 //
@@ -40,8 +41,12 @@ Deno.serve(async (req) => {
     const { data: adminRow } = await guard.from("app_admins").select("user_id").eq("user_id", user.id).maybeSingle();
     if (adminRow) return json({ error: "Super admins cannot purchase" }, 403);
 
-    const { returnUrl } = await req.json().catch(() => ({}));
+    const { returnUrl, tenantId } = await req.json().catch(() => ({}));
     if (typeof returnUrl !== "string" || !/^https?:\/\//.test(returnUrl)) return json({ error: "returnUrl required" }, 400);
+    // Only a reseller admin of the company may buy for it (same rule as software checkout).
+    if (typeof tenantId !== "string") return json({ error: "tenantId required" }, 400);
+    const { data: allowed } = await supabase.rpc("can_buy_for_tenant", { t: tenantId });
+    if (allowed !== true) return json({ error: "Only a reseller admin can purchase domains" }, 403);
 
     // The cart is read with the caller's own token, so row-level security limits it to their rows.
     const { data: basket, error: cartErr } = await supabase.from("domain_cart_items").select("domain, years");
@@ -66,7 +71,7 @@ Deno.serve(async (req) => {
     const total = cart.reduce((s, i) => s + i.price, 0);
 
     const { data: order, error: orderErr } = await admin.from("domain_orders")
-      .insert({ user_id: user.id, currency, total }).select("id").single();
+      .insert({ user_id: user.id, tenant_id: tenantId, currency, total }).select("id").single();
     if (orderErr) throw orderErr;
     const { error: itemsErr } = await admin.from("domain_order_items")
       .insert(cart.map((i) => ({ order_id: order.id, domain: i.domain, years: i.years, price: i.price })));

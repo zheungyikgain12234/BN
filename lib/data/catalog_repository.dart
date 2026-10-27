@@ -179,7 +179,9 @@ class DomainCartRepository {
 
   /// Saves the basket as an order and returns the Stripe payment page to send the browser to.
   Future<String> startCheckout(String returnUrl) async {
-    final res = await sb.functions.invoke('domain-checkout', body: {'returnUrl': returnUrl});
+    final tenant = AppState.instance.tenant;
+    if (tenant == null) throw 'Select a company first';
+    final res = await sb.functions.invoke('domain-checkout', body: {'returnUrl': returnUrl, 'tenantId': tenant.id});
     final data = res.data as Map?;
     final url = data?['url'] as String?;
     if (url == null) throw '${data?['error'] ?? 'Could not start checkout'}';

@@ -21,6 +21,7 @@ import 'features/domain/domain_search_api_screen.dart';
 import 'features/domain/domain_search_screen.dart';
 import 'features/hosting/hosting_embed_test_screen.dart';
 import 'features/hosting/hosting_screen.dart';
+import 'features/domain/purchased_domains_screen.dart';
 import 'features/shell/app_shell.dart';
 import 'features/shell/placeholder_screen.dart';
 
@@ -61,6 +62,7 @@ class Routes {
   static const adminMasters = '/admin/masters';
   static const domainSearch = '/domain-search';
   static const domainSearchApi = '/domain-search-api';
+  static const purchasedDomains = '/purchased-domains';
   static const orderVps = '/order-vps';
   static const orderHosting = '/order-hosting';
   static const orderSsl = '/order-ssl';
@@ -119,6 +121,7 @@ final router = GoRouter(
           GoRoute(path: e.key, builder: (_, _) => PanelEmbedScreen(title: e.value, url: '${Env.panelBase}${e.key}')),
         GoRoute(path: Routes.domainSearchApi, builder: (_, _) => const DomainSearchApiScreen()),
         GoRoute(path: Routes.orderHosting, builder: (_, _) => const HostingScreen()),
+        GoRoute(path: Routes.purchasedDomains, builder: (_, _) => const PurchasedDomainsScreen()),
         GoRoute(path: Routes.adminCompanies, builder: (_, _) => const CompaniesScreen()),
         GoRoute(path: Routes.adminUsers, builder: (_, _) => const UsersScreen()),
         GoRoute(path: Routes.hostingTest, builder: (_, _) => const HostingEmbedTestScreen()),
