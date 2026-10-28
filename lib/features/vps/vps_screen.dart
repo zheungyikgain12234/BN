@@ -9,7 +9,8 @@ import '../../data/models.dart';
 
 /// VPS with a native UI. Only plans that have a price in Master Data > VPS prices are offered; the reseller picks a
 /// billing period, an operating system and a location, names the server, and adds it to the basket.
-/// Left out for now: cPanel, snapshot backup, extra disks and one-click apps.
+/// Optional add-ons (cPanel licence, snapshot backup, extra disk) come from Master Data > VPS add-on prices and are
+/// ordered from 20i right after the server is created. Left out for now: extra IP addresses and one-click apps.
 class VpsScreen extends StatefulWidget {
   const VpsScreen({super.key});
 
@@ -23,10 +24,14 @@ class _VpsScreenState extends State<VpsScreen> {
 
   Map<String, List<VpsPrice>>? _plans; // by 20i VPS type
   List<VpsOs> _os = const [];
+  List<VpsAddonPrice> _addons = const [];
   Object? _error;
   final Map<String, VpsPrice> _period = {};
   final Map<String, VpsOs> _picked = {};
   final Map<String, String> _location = {};
+  final Map<String, VpsAddonPrice> _cpanel = {};
+  final Map<String, VpsAddonPrice> _backup = {};
+  final Map<String, VpsAddonPrice> _disk = {};
   final Map<String, TextEditingController> _name = {};
   final Set<String> _added = {};
 
@@ -52,7 +57,9 @@ class _VpsScreenState extends State<VpsScreen> {
         plans.putIfAbsent(p.vpsType, () => []).add(p);
       }
       final os = await vpsCartRepo.osOptions();
-      if (mounted) setState(() { _plans = plans; _os = os; });
+      // Add-ons are optional: if their table isn't created yet the plans must still work.
+      final addons = await vpsCartRepo.addonPrices().catchError((_) => <VpsAddonPrice>[]);
+      if (mounted) setState(() { _plans = plans; _os = os; _addons = addons; });
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
@@ -76,11 +83,39 @@ class _VpsScreenState extends State<VpsScreen> {
       return;
     }
     try {
-      await vpsCartRepo.add(serverName: name, plan: plan, os: os, location: _location[type] ?? _locations.keys.first);
+      final addons = [_cpanel[type], _backup[type], _disk[type]].whereType<VpsAddonPrice>().toList();
+      await vpsCartRepo.add(serverName: name, plan: plan, os: os, location: _location[type] ?? _locations.keys.first, addons: addons);
       if (mounted) setState(() => _added.add(type));
     } catch (e) {
       if (mounted) showError(context, e);
     }
+  }
+
+  /// "None" plus one entry per priced add-on of a kind, in the plan's currency.
+  Widget _addonPicker(String type, String label, List<VpsAddonPrice> options, Map<String, VpsAddonPrice> picked, String currency) {
+    final list = options.where((a) => a.currency == currency).toList();
+    if (list.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      width: 250,
+      child: DropdownButtonFormField<VpsAddonPrice?>(
+        initialValue: picked[type],
+        isExpanded: true,
+        hint: dropdownHint(label),
+        decoration: fieldDecoration(),
+        items: [
+          DropdownMenuItem<VpsAddonPrice?>(value: null, child: Text('$label: none')),
+          for (final a in list) DropdownMenuItem<VpsAddonPrice?>(value: a, child: Text('${a.label} · ${a.periodLabel}', overflow: TextOverflow.ellipsis)),
+        ],
+        onChanged: (a) => setState(() {
+          if (a == null) {
+            picked.remove(type);
+          } else {
+            picked[type] = a;
+          }
+          _added.remove(type);
+        }),
+      ),
+    );
   }
 
   Widget _plan(String type, List<VpsPrice> options) {
@@ -140,6 +175,9 @@ class _VpsScreenState extends State<VpsScreen> {
               onChanged: (_) => setState(edited),
             ),
           ),
+          _addonPicker(type, 'cPanel', [for (final a in _addons) if (a.isCpanel) a], _cpanel, period.currency),
+          _addonPicker(type, 'Snapshot backup', [for (final a in _addons) if (a.isBackup) a], _backup, period.currency),
+          _addonPicker(type, 'Extra disk', [for (final a in _addons) if (a.isDisk) a]..sort((a, b) => a.diskGb.compareTo(b.diskGb)), _disk, period.currency),
           inBasket
               ? OutlinedButton.icon(onPressed: () => context.go(Routes.cart), icon: const Icon(Icons.check, size: 16), label: const Text('In basket'))
               : PrimaryButton(label: 'Add to Basket', icon: Icons.add_shopping_cart, expand: false, onPressed: () => _add(type, period)),

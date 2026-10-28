@@ -175,9 +175,59 @@ class _MasterDialogState extends State<_MasterDialog> {
   String? get _pickerField => switch (widget.def.table) {
         'hosting_plan_prices' => 'package_type_id',
         'vps_plan_prices' => 'vps_type',
+        'ssl_plan_prices' => 'class_code',
+        'vps_addon_prices' => 'product_spec',
         'vps_os_options' => 'code',
         _ => null,
       };
+
+  /// VPS add-on prices: choose a cPanel licence, backup or disk from the panel shop's list.
+  Future<void> _pickVpsAddon() async {
+    try {
+      final addons = await vpsCartRepo.panelAddons();
+      if (!mounted) return;
+      final chosen = await showDialog<({String spec, String label, int months, double price})>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('VPS add-ons from 20i'),
+          children: [
+            if (addons.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
+            for (final a in addons) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, a), child: Text('${a.label}  (${a.spec}, shop price ${a.price.toStringAsFixed(2)} / ${a.months} mo)')),
+          ],
+        ),
+      );
+      if (chosen == null) return;
+      _text['product_spec']!.text = chosen.spec;
+      if (_text['label']!.text.trim().isEmpty) _text['label']!.text = chosen.label;
+      if (_text['months']!.text.trim().isEmpty) _text['months']!.text = '${chosen.months}';
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
+  /// SSL prices: choose a certificate from the panel shop's list (read through the panel login).
+  Future<void> _pickSsl() async {
+    try {
+      final plans = await sslCartRepo.panelCatalogue();
+      if (!mounted) return;
+      final chosen = await showDialog<({String code, String label, int months, double price})>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('SSL certificates from 20i'),
+          children: [
+            if (plans.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
+            for (final p in plans) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, p), child: Text('${p.label}  (${p.code}, shop price ${p.price.toStringAsFixed(2)} / ${p.months} mo)')),
+          ],
+        ),
+      );
+      if (chosen == null) return;
+      _text['class_code']!.text = chosen.code;
+      if (_text['plan_name']!.text.trim().isEmpty) _text['plan_name']!.text = chosen.label;
+      if (_text['months']!.text.trim().isEmpty) _text['months']!.text = '${chosen.months}';
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
 
   /// VPS prices / operating systems: choose from the panel shop's list (read through the panel login).
   Future<void> _pickVps() async {
@@ -302,7 +352,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         ),
                         if (f.key == _pickerField)
                           TextButton.icon(
-                            onPressed: def.table == 'hosting_plan_prices' ? _pick20iPlan : _pickVps,
+                            onPressed: switch (def.table) { 'hosting_plan_prices' => _pick20iPlan, 'ssl_plan_prices' => _pickSsl, 'vps_addon_prices' => _pickVpsAddon, _ => _pickVps },
                             icon: const Icon(Icons.cloud_download_outlined, size: 18),
                             label: const Text('Pick from 20i'),
                           ),

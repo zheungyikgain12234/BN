@@ -105,8 +105,40 @@ class PurchasedVps {
         purchasedAt = DateTime.parse(j['purchased_at'] as String),
         clientId = j['client_id'] as String?,
         clientName = ((j['clients'] as Map<String, dynamic>?)?['name'] ?? '') as String,
-        sellPrice = (j['sell_price'] as num?)?.toDouble();
+        sellPrice = (j['sell_price'] as num?)?.toDouble(),
+        addons = [for (final a in (j['addons'] as List? ?? const [])) '${a['label']}'];
   final String id, planName, serverName, osLabel, location, currency, status, clientName;
+
+  /// Names of the add-ons ordered with the server (cPanel, backup, extra disks); their cost is part of [unitPrice].
+  final List<String> addons;
+  final String? clientId, note;
+  final int months;
+  final double unitPrice;
+  final double? sellPrice;
+  final DateTime purchasedAt;
+
+  bool get assigned => clientId != null;
+  bool get failed => status == 'failed';
+  double? get profit => sellPrice == null ? null : sellPrice! - unitPrice;
+}
+
+/// One purchased SSL certificate. Assigned when [clientId] is set; [unitPrice] is what the reseller paid.
+class PurchasedSsl {
+  PurchasedSsl.fromJson(Map<String, dynamic> j)
+      : id = j['id'] as String,
+        planName = j['plan_name'] as String,
+        hostname = j['hostname'] as String,
+        verification = j['verification'] as String,
+        months = j['months'] as int,
+        unitPrice = (j['unit_price'] as num).toDouble(),
+        currency = (j['currency'] ?? '') as String,
+        status = j['status'] as String,
+        note = j['note'] as String?,
+        purchasedAt = DateTime.parse(j['purchased_at'] as String),
+        clientId = j['client_id'] as String?,
+        clientName = ((j['clients'] as Map<String, dynamic>?)?['name'] ?? '') as String,
+        sellPrice = (j['sell_price'] as num?)?.toDouble();
+  final String id, planName, hostname, verification, currency, status, clientName;
   final String? clientId, note;
   final int months;
   final double unitPrice;
@@ -181,6 +213,14 @@ class ResellerRepository {
 
   Future<void> assignVps(String vpsId, String? clientId, double? sellPrice) =>
       sb.rpc('assign_vps', params: {'p_vps': vpsId, 'p_client': clientId, 'p_sell_price': sellPrice});
+
+  Future<List<PurchasedSsl>> purchasedSsl(String tenantId) async {
+    final rows = await sb.from('purchased_ssl').select('*, clients(name)').eq('tenant_id', tenantId).order('purchased_at', ascending: false);
+    return rows.map<PurchasedSsl>(PurchasedSsl.fromJson).toList();
+  }
+
+  Future<void> assignSsl(String sslId, String? clientId, double? sellPrice) =>
+      sb.rpc('assign_ssl', params: {'p_ssl': sslId, 'p_client': clientId, 'p_sell_price': sellPrice});
 
   Future<void> checkout(String tenantId, List<CheckoutLine> lines) =>
       sb.rpc('checkout', params: {'p_tenant': tenantId, 'p_lines': [for (final l in lines) l.toJson()]});

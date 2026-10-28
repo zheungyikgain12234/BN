@@ -335,11 +335,52 @@ class VpsOs {
   factory VpsOs.fromJson(Map<String, dynamic> j) => VpsOs(label: j['label'] as String, code: j['code'] as String);
 }
 
+/// What the reseller charges for one VPS add-on over one billing period (Master Data > VPS add-on prices).
+/// [spec] is the 20i productSpec, e.g. vps_addon-cpanelpro, vps_addon-backup or vps_addon-disk100GB.
+class VpsAddonPrice {
+  const VpsAddonPrice({required this.label, required this.spec, required this.months, required this.price, required this.currency});
+  final String label, spec, currency;
+  final int months;
+  final double price;
+
+  bool get isCpanel => spec.startsWith('vps_addon-cpanel');
+  bool get isBackup => spec == 'vps_addon-backup';
+  bool get isDisk => RegExp(r'^vps_addon-disk\d+GB$').hasMatch(spec);
+
+  /// Disk size in GB (0 when this is not a disk), to sort the disk list.
+  int get diskGb => int.tryParse(RegExp(r'\d+').firstMatch(spec)?.group(0) ?? '') ?? 0;
+
+  String get periodLabel => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
+
+  factory VpsAddonPrice.fromJson(Map<String, dynamic> j) => VpsAddonPrice(
+        label: j['label'] as String,
+        spec: j['product_spec'] as String,
+        months: j['months'] as int,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+/// One add-on picked for a VPS in the basket: the add-on and its billing period.
+class VpsAddonChoice {
+  const VpsAddonChoice({required this.spec, required this.label, required this.months, required this.price});
+  final String spec, label;
+  final int months;
+  final double price;
+}
+
 class VpsCartItem {
-  const VpsCartItem({required this.id, required this.vpsType, required this.planName, required this.months, required this.osLabel, required this.location, required this.serverName, required this.price, required this.currency});
+  const VpsCartItem({required this.id, required this.vpsType, required this.planName, required this.months, required this.osLabel, required this.location, required this.serverName, required this.price, required this.currency, this.addons = const [], this.addonSpecs = const []});
   final String id, vpsType, planName, osLabel, location, serverName, currency;
   final int months;
   final double price;
+
+  /// The add-ons with today's Master Data price (filled in by the basket); [addonSpecs] is what was saved.
+  final List<VpsAddonChoice> addons;
+  final List<({String spec, int months})> addonSpecs;
+
+  /// The server plus every add-on.
+  double get total => price + addons.fold<double>(0, (t, a) => t + a.price);
 
   factory VpsCartItem.fromJson(Map<String, dynamic> j) => VpsCartItem(
         id: j['id'] as String,
@@ -351,6 +392,7 @@ class VpsCartItem {
         serverName: j['server_name'] as String,
         price: (j['price'] as num).toDouble(),
         currency: (j['currency'] ?? 'USD') as String,
+        addonSpecs: [for (final a in (j['addons'] as List? ?? const [])) (spec: '${a['spec']}', months: (a['months'] as num).toInt())],
       );
 }
 
@@ -379,6 +421,75 @@ class VpsOrderItem {
   factory VpsOrderItem.fromJson(Map<String, dynamic> j) => VpsOrderItem(
         planName: j['plan_name'] as String,
         serverName: j['server_name'] as String,
+        months: j['months'] as int,
+        status: j['status'] as String,
+        note: j['note'] as String?,
+      );
+}
+
+/// What the reseller charges for one SSL certificate type over one period (Master Data > SSL prices).
+class SslPrice {
+  const SslPrice({required this.classCode, required this.planName, required this.months, required this.price, required this.currency});
+  final String classCode, planName, currency;
+  final int months;
+  final double price;
+
+  /// A wildcard certificate covers every subdomain, so its name is always "*.domain".
+  bool get wildcard => classCode.endsWith('_wildcard');
+
+  String get label => '${months % 12 == 0 ? '${months ~/ 12} ${months == 12 ? 'year' : 'years'}' : '$months months'} for $currency ${price.toStringAsFixed(2)}';
+
+  factory SslPrice.fromJson(Map<String, dynamic> j) => SslPrice(
+        classCode: j['class_code'] as String,
+        planName: j['plan_name'] as String,
+        months: j['months'] as int,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+class SslCartItem {
+  const SslCartItem({required this.id, required this.classCode, required this.planName, required this.months, required this.hostname, required this.price, required this.currency});
+  final String id, classCode, planName, hostname, currency;
+  final int months;
+  final double price;
+
+  factory SslCartItem.fromJson(Map<String, dynamic> j) => SslCartItem(
+        id: j['id'] as String,
+        classCode: j['class_code'] as String,
+        planName: j['plan_name'] as String,
+        months: j['months'] as int,
+        hostname: j['hostname'] as String,
+        price: (j['price'] as num).toDouble(),
+        currency: (j['currency'] ?? 'USD') as String,
+      );
+}
+
+/// A paid (or pending) SSL checkout, with one line per certificate.
+class SslOrder {
+  const SslOrder({required this.id, required this.status, required this.currency, required this.total, required this.items});
+  final String id, status, currency;
+  final double total;
+  final List<SslOrderItem> items;
+
+  factory SslOrder.fromJson(Map<String, dynamic> j) => SslOrder(
+        id: j['id'] as String,
+        status: j['status'] as String,
+        currency: j['currency'] as String,
+        total: (j['total'] as num).toDouble(),
+        items: [for (final i in (j['ssl_order_items'] as List? ?? const [])) SslOrderItem.fromJson(i as Map<String, dynamic>)],
+      );
+}
+
+class SslOrderItem {
+  const SslOrderItem({required this.planName, required this.hostname, required this.months, required this.status, this.note});
+  final String planName, hostname, status;
+  final int months;
+  final String? note;
+
+  factory SslOrderItem.fromJson(Map<String, dynamic> j) => SslOrderItem(
+        planName: j['plan_name'] as String,
+        hostname: j['hostname'] as String,
         months: j['months'] as int,
         status: j['status'] as String,
         note: j['note'] as String?,

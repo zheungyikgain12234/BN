@@ -19,7 +19,6 @@ class DomainResult {
 }
 
 /// Domain search with a native UI; availability comes from the `domain-search` Edge Function (20i API).
-/// The embedded panel version stays available as "Domain Search (Panel)".
 class DomainSearchApiScreen extends StatefulWidget {
   const DomainSearchApiScreen({super.key});
 

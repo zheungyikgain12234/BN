@@ -173,7 +173,7 @@ async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): 
   return out;
 }
 
-// Reads the panel shop's VPS plans and operating systems with the logged-in session (the same two JSON calls the
+// Reads the panel shop's VPS plans, operating systems and SSL certificates with the logged-in session (the same two JSON calls the
 // panel's own order-vps page makes). Not a documented 20i API: the shape may change if the panel does, so every field
 // is read defensively. Used by Master Data to offer "Pick from 20i" for VPS prices and operating systems.
 async function fetchVpsCatalogue(jar: Map<string, string>) {
@@ -196,6 +196,27 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop's price, only a hint
     }));
 
+  // SSL certificates live in the same catalogue as tls_certificate:<class-code> (e.g. tls_certificate:tucows-rapidssl).
+  const sslPlans = (Array.isArray(products) ? products : [])
+    .filter((p: any) => typeof p?.code === "string" && /^tls_certificate:[a-z0-9_-]+$/i.test(p.code) && !p.discontinued)
+    .map((p: any) => ({
+      code: String(p.code).replace(/^tls_certificate:/i, ""),      // tucows-rapidssl, the 20i class-code
+      label: String(p.label ?? p.code),                            // Simple SSL
+      months: Number(p.pricing?.[0]?.periodMonths ?? 12),
+      price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop price, only a hint
+    }));
+
+  // VPS add-ons: cPanel licences, snapshot backup and extra disks (vps_addon:cpanelpro, vps_addon:disk100GB ...).
+  // spec is the 20i productSpec ("vps_addon-cpanelpro"), which is what addVpsAddon wants.
+  const vpsAddons = (Array.isArray(products) ? products : [])
+    .filter((p: any) => typeof p?.code === "string" && /^vps_addon:(cpanel[a-z0-9]*|backup|disk\d+GB)$/i.test(p.code) && !p.discontinued)
+    .map((p: any) => ({
+      spec: String(p.code).replace(":", "-"),                      // vps_addon-cpanelpro
+      label: String(p.label ?? p.code),                            // cPanel Pro (Max 30 Sites)
+      months: Number(p.pricing?.[0]?.periodMonths ?? 1),
+      price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop price, only a hint
+    }));
+
   // The OS list is per product; the first plan's list is the same set the order page offers.
   let os: { code: string; label: string; paid: boolean }[] = [];
   if (plans.length) {
@@ -205,8 +226,8 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       .map((o: any) => ({ code: String(o.code), label: String(o.label ?? o.code), paid }));
     os = [...pick(reply?.free, false), ...pick(reply?.paid, true)];
   }
-  console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems");
-  return { vpsPlans: plans, vpsOs: os };
+  console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems,", sslPlans.length, "ssl certificates,", vpsAddons.length, "vps add-ons");
+  return { vpsPlans: plans, vpsOs: os, sslPlans, vpsAddons };
 }
 
 Deno.serve(async (req) => {

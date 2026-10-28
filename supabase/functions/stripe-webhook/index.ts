@@ -139,7 +139,44 @@ async function handleHosting(admin: ReturnType<typeof createClient>, orderId: st
   return new Response("ok");
 }
 
-type VpsItem = { id: string; vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string };
+type VpsAddon = { spec: string; label: string; months: number; price: number };
+type VpsItem = { id: string; vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string; addons: VpsAddon[] };
+
+// 20i: POST /reseller/{id}/addVpsAddon orders one add-on (cPanel licence, snapshot backup or extra disk) for an existing
+// server and CHARGES THE 20i ACCOUNT BALANCE immediately; it gets its own contract, so it renews separately from the server.
+// Body per the 20i docs: configuration.vpsRef (the server id), productSpec ("vps_addon-cpanelpro", "vps_addon-backup",
+// "vps_addon-disk100GB"...), periodMonths, serviceType "vps_addon", and for backups options.vpsType (the server type
+// without the "vps-" prefix). UNVERIFIED against a live reply, notably whether cPanel needs a compatible operating system
+// and whether a brand-new server is ready for add-ons straight away.
+async function addVpsAddonWith20i(admin: ReturnType<typeof createClient>, userId: string, vpsId: string, item: VpsItem, addon: VpsAddon): Promise<void> {
+  const key = Deno.env.get("TWENTYI_API_KEY");
+  if (!key) throw new Error("TWENTYI_API_KEY is not set");
+  const reseller = Deno.env.get("TWENTYI_RESELLER_ID") ?? "*";
+
+  const { data: su } = await admin.from("stackcp_users").select("stack_user_id").eq("user_id", userId).maybeSingle();
+  const body: Record<string, unknown> = {
+    configuration: { vpsRef: vpsId },
+    periodMonths: addon.months,
+    productSpec: addon.spec,
+    serviceType: "vps_addon",
+  };
+  if (addon.spec === "vps_addon-backup") body.options = { vpsType: item.vps_type.replace(/^vps-/, "") };
+  if (su?.stack_user_id) body.forUser = su.stack_user_id;
+
+  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addVpsAddon`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${btoa(key)}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  console.log("20i addVpsAddon", item.server_name, addon.spec, res.status, text.slice(0, 500));
+  if (!res.ok) throw new Error(`20i ${res.status}: ${text.slice(0, 250)}`);
+  let addonId: unknown;
+  try { addonId = JSON.parse(text)?.result; } catch { /* handled below */ }
+  if (typeof addonId !== "number" && !(typeof addonId === "string" && addonId !== "")) {
+    throw new Error(`20i did not return an add-on id: ${text.slice(0, 200)}`);
+  }
+}
 
 // 20i: POST /reseller/{id}/addVPS orders the server and CHARGES THE 20i ACCOUNT BALANCE immediately; with too little
 // credit it fails and nothing is created. Body per the 20i docs: type ("vps-e" style), periodMonths, options.os,
@@ -186,7 +223,7 @@ async function handleVps(admin: ReturnType<typeof createClient>, orderId: string
 
   const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
   const { data: items } = await admin.from("vps_order_items")
-    .select("id, vps_type, plan_name, months, os_code, os_label, location, server_name, price").eq("order_id", orderId);
+    .select("id, vps_type, plan_name, months, os_code, os_label, location, server_name, price, addons").eq("order_id", orderId);
   for (const item of (items ?? []) as (VpsItem & { price: number })[]) {
     let status: "test_registered" | "registered" | "failed";
     let note: string | null = null;
@@ -199,6 +236,17 @@ async function handleVps(admin: ReturnType<typeof createClient>, orderId: string
         const vpsId = await createVpsWith20i(admin, claimed.user_id, item);
         status = "registered";
         note = `20i VPS ${vpsId}`;
+        // The server exists now. A failed add-on does not undo it: it is listed in the note so it can be ordered by hand.
+        const failed: string[] = [];
+        for (const addon of item.addons ?? []) {
+          try {
+            await addVpsAddonWith20i(admin, claimed.user_id, vpsId, item, addon);
+          } catch (e) {
+            console.error("vps add-on failed", item.server_name, addon.spec, e);
+            failed.push(`${addon.label}: ${String((e as Error).message ?? e).slice(0, 120)}`);
+          }
+        }
+        if (failed.length) note = `${note}; add-on(s) NOT ordered, order by hand: ${failed.join(" | ")}`.slice(0, 600);
       } catch (e) {
         console.error("vps creation failed", item.server_name, e);
         status = "failed";
@@ -210,12 +258,96 @@ async function handleVps(admin: ReturnType<typeof createClient>, orderId: string
       const { error } = await admin.from("purchased_vps").insert({
         tenant_id: claimed.tenant_id, order_item_id: item.id, plan_name: item.plan_name, vps_type: item.vps_type,
         months: item.months, os_label: item.os_label, location: item.location, server_name: item.server_name,
-        unit_price: item.price, currency: claimed.currency, status, note,
+        // The reseller's cost is the server plus every add-on.
+        unit_price: item.price + (item.addons ?? []).reduce((t, a) => t + a.price, 0), addons: item.addons ?? [], currency: claimed.currency, status, note,
       });
       if (error) console.error("purchased_vps insert failed", item.server_name, error.message);
     }
   }
   await admin.from("vps_cart_items").delete().eq("user_id", claimed.user_id).in("server_name", (items ?? []).map((i) => i.server_name));
+  return new Response("ok");
+}
+
+type SslItem = { id: string; class_code: string; plan_name: string; months: number; hostname: string; verification: string; contact: Record<string, string> };
+
+// 20i: POST /reseller/{id}/addTlsCertificate orders the certificate and CHARGES THE 20i ACCOUNT BALANCE immediately; with
+// too little credit it fails and nothing is created. Body per the 20i docs: class-code, name (the site name), periodMonths and
+// configuration. UNVERIFIED against a live reply: the docs say the configuration options vary by certificate type and give no
+// field list, so the verification method and contact block below follow the panel's order form. Check the first live reply
+// (logged below) and adjust. Success is expected to return the new certificate id as {"result": <id>}, like addWeb.
+async function createSslWith20i(admin: ReturnType<typeof createClient>, userId: string, item: SslItem): Promise<string> {
+  const key = Deno.env.get("TWENTYI_API_KEY");
+  if (!key) throw new Error("TWENTYI_API_KEY is not set");
+  const reseller = Deno.env.get("TWENTYI_RESELLER_ID") ?? "*";
+
+  const { data: su } = await admin.from("stackcp_users").select("stack_user_id").eq("user_id", userId).maybeSingle();
+  const body: Record<string, unknown> = {
+    "class-code": item.class_code,
+    name: item.hostname,
+    periodMonths: item.months,
+    configuration: { verification: item.verification, contact: item.contact },
+  };
+  if (su?.stack_user_id) body.forUser = su.stack_user_id;
+
+  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addTlsCertificate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${btoa(key)}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  console.log("20i addTlsCertificate", item.hostname, res.status, text.slice(0, 500));
+  if (!res.ok) throw new Error(`20i ${res.status}: ${text.slice(0, 250)}`);
+  let certId: unknown;
+  try { certId = JSON.parse(text)?.result; } catch { /* handled below */ }
+  if (typeof certId !== "number" && !(typeof certId === "string" && certId !== "")) {
+    throw new Error(`20i did not return a certificate id: ${text.slice(0, 200)}`);
+  }
+  return String(certId);
+}
+
+// Same shape as the VPS branch, on the ssl_* tables.
+async function handleSsl(admin: ReturnType<typeof createClient>, orderId: string): Promise<Response> {
+  // Only the first delivery wins: Stripe may send the same event again, and we must not order twice.
+  const { data: claimed } = await admin.from("ssl_orders")
+    .update({ status: "paid", paid_at: new Date().toISOString() })
+    .eq("id", orderId).eq("status", "pending").select("id, user_id, tenant_id, currency").maybeSingle();
+  if (!claimed) return new Response("already handled");
+
+  const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
+  const { data: items } = await admin.from("ssl_order_items")
+    .select("id, class_code, plan_name, months, hostname, verification, contact, price").eq("order_id", orderId);
+  for (const item of (items ?? []) as (SslItem & { price: number })[]) {
+    let status: "test_registered" | "registered" | "failed";
+    let note: string | null = null;
+    if (!live) {
+      console.log(`TEST MODE: would order ${item.plan_name} for ${item.hostname} for user ${claimed.user_id}`);
+      status = "test_registered";
+      note = "test mode: not sent to 20i";
+    } else {
+      try {
+        const certId = await createSslWith20i(admin, claimed.user_id, item);
+        status = "registered";
+        note = `20i certificate ${certId}`;
+      } catch (e) {
+        console.error("ssl order failed", item.hostname, e);
+        status = "failed";
+        note = String((e as Error).message ?? e).slice(0, 300);
+      }
+    }
+    await admin.from("ssl_order_items").update({ status, note }).eq("id", item.id);
+    if (claimed.tenant_id) {
+      const { error } = await admin.from("purchased_ssl").insert({
+        tenant_id: claimed.tenant_id, order_item_id: item.id, plan_name: item.plan_name, class_code: item.class_code,
+        months: item.months, hostname: item.hostname, verification: item.verification,
+        unit_price: item.price, currency: claimed.currency, status, note,
+      });
+      if (error) console.error("purchased_ssl insert failed", item.hostname, error.message);
+    }
+  }
+  const { data: me } = await admin.from("ssl_order_items").select("hostname, class_code").eq("order_id", orderId);
+  for (const i of me ?? []) {
+    await admin.from("ssl_cart_items").delete().eq("user_id", claimed.user_id).eq("hostname", i.hostname).eq("class_code", i.class_code);
+  }
   return new Response("ok");
 }
 
@@ -237,6 +369,7 @@ Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   if (session.metadata?.kind === "hosting") return handleHosting(admin, orderId);
   if (session.metadata?.kind === "vps") return handleVps(admin, orderId);
+  if (session.metadata?.kind === "ssl") return handleSsl(admin, orderId);
 
   // Only the first delivery wins: Stripe may send the same event again, and we must not register twice.
   const { data: claimed } = await admin.from("domain_orders")

@@ -46,28 +46,39 @@ Deno.serve(async (req) => {
 
     // The basket is read with the caller's own token, so row-level security limits it to their rows.
     const { data: basket, error: cartErr } = await supabase.from("vps_cart_items")
-      .select("vps_type, months, os_code, os_label, location, server_name");
+      .select("vps_type, months, os_code, os_label, location, server_name, addons");
     if (cartErr) throw cartErr;
     if (!basket?.length) return json({ error: "Your VPS basket is empty" }, 400);
 
     const { data: prices, error: priceErr } = await admin.from("vps_plan_prices").select("vps_type, plan_name, months, price, currency");
     if (priceErr) throw priceErr;
-    const cart: { vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string; price: number; currency: string }[] = [];
+    // Add-ons (cPanel, backup, disks) are re-priced from vps_addon_prices too; the basket only remembers which ones.
+    const { data: addonPrices, error: addonErr } = await admin.from("vps_addon_prices").select("label, product_spec, months, price, currency");
+    if (addonErr) throw addonErr;
+    type Addon = { spec: string; label: string; months: number; price: number };
+    const cart: { vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string; price: number; currency: string; addons: Addon[] }[] = [];
     for (const b of basket) {
       const p = prices?.find((x) => x.vps_type === b.vps_type && x.months === b.months);
       if (!p) return json({ error: `No price is set for the plan on ${b.server_name} (${b.months} months). Remove it from the basket.` }, 400);
-      cart.push({ ...b, plan_name: p.plan_name, price: Number(p.price), currency: p.currency });
+      const addons: Addon[] = [];
+      for (const a of (b.addons ?? []) as { spec: string; months: number }[]) {
+        const ap = addonPrices?.find((x) => x.product_spec === a.spec && x.months === a.months);
+        if (!ap) return json({ error: `No price is set for an add-on (${a.spec}) on ${b.server_name}. Remove the server from the basket and add it again.` }, 400);
+        if (ap.currency !== p.currency) return json({ error: `Add-on ${ap.label} is priced in ${ap.currency}, but the server is in ${p.currency}` }, 400);
+        addons.push({ spec: a.spec, label: ap.label, months: a.months, price: Number(ap.price) });
+      }
+      cart.push({ ...b, plan_name: p.plan_name, price: Number(p.price), currency: p.currency, addons });
     }
     const currency = cart[0].currency;
     if (cart.some((i) => i.currency !== currency)) return json({ error: "Basket mixes currencies; pay for them separately" }, 400);
-    const total = cart.reduce((s, i) => s + i.price, 0);
+    const total = cart.reduce((s, i) => s + i.price + i.addons.reduce((t, a) => t + a.price, 0), 0);
 
     const { data: order, error: orderErr } = await admin.from("vps_orders")
       .insert({ user_id: user.id, tenant_id: tenantId, currency, total }).select("id").single();
     if (orderErr) throw orderErr;
     const { error: itemsErr } = await admin.from("vps_order_items").insert(cart.map((i) => ({
       order_id: order.id, vps_type: i.vps_type, plan_name: i.plan_name, months: i.months, os_code: i.os_code,
-      os_label: i.os_label, location: i.location, server_name: i.server_name, price: i.price,
+      os_label: i.os_label, location: i.location, server_name: i.server_name, price: i.price, addons: i.addons,
     })));
     if (itemsErr) throw itemsErr;
 
@@ -82,11 +93,17 @@ Deno.serve(async (req) => {
       "metadata[kind]": "vps",
     });
     if (!user.email) form.delete("customer_email");
-    cart.forEach((i, n) => {
+    const months = (m: number) => `${m} ${m === 1 ? "month" : "months"}`;
+    // One Stripe line per server, plus one per add-on.
+    const lines = cart.flatMap((i) => [
+      { name: `${i.plan_name} "${i.server_name}" (${months(i.months)})`, price: i.price },
+      ...i.addons.map((a) => ({ name: `${a.label} for "${i.server_name}" (${months(a.months)})`, price: a.price })),
+    ]);
+    lines.forEach((l, n) => {
       form.set(`line_items[${n}][quantity]`, "1");
       form.set(`line_items[${n}][price_data][currency]`, currency.toLowerCase());
-      form.set(`line_items[${n}][price_data][unit_amount]`, String(Math.round(i.price * 100)));
-      form.set(`line_items[${n}][price_data][product_data][name]`, `${i.plan_name} "${i.server_name}" (${i.months} ${i.months === 1 ? "month" : "months"})`);
+      form.set(`line_items[${n}][price_data][unit_amount]`, String(Math.round(l.price * 100)));
+      form.set(`line_items[${n}][price_data][product_data][name]`, l.name);
     });
 
     const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {

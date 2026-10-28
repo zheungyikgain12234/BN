@@ -35,15 +35,14 @@ List<_NavGroup> _navFor(AppState s) => s.isSuperAdmin
       ]
     : [
       const _NavGroup('Hosting Solutions', [
-        _NavItem('Domain Search', Icons.language, Routes.domainSearch),
-        _NavItem('Domain Search (API)', Icons.travel_explore, Routes.domainSearchApi),
+        _NavItem('Domain Search', Icons.travel_explore, Routes.domainSearch),
         _NavItem('Purchased Domains', Icons.language, Routes.purchasedDomains),
         _NavItem('VPS', Icons.dns_outlined, Routes.orderVps),
         _NavItem('Purchased VPS', Icons.storage_outlined, Routes.purchasedVps),
         _NavItem('Web Hosting', Icons.cloud_outlined, Routes.orderHosting),
         _NavItem('Purchased Hosting', Icons.cloud_done_outlined, Routes.purchasedHosting),
         _NavItem('SSL Certificates', Icons.lock_outline, Routes.orderSsl),
-        _NavItem('WordPress Hosting', Icons.web, Routes.orderWordpress),
+        _NavItem('Purchased SSL', Icons.verified_user_outlined, Routes.purchasedSsl),
       ]),
       const _NavGroup('Software Solutions', [
         _NavItem('Software', Icons.apps, Routes.software),

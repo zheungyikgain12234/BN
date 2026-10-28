@@ -139,6 +139,8 @@ class _PurchasedVpsScreenState extends State<PurchasedVpsScreen> {
                           cell: (d) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Text('${d.planName} · ${d.serverName}', style: T.labelLg),
                             Text('${d.osLabel} · ${_place(d.location)}', style: T.bodySm.copyWith(color: C.secondary)),
+                            if (d.addons.isNotEmpty) Text('+ ${d.addons.join(', ')}', style: T.bodySm.copyWith(color: C.secondary)),
+                            if (!d.failed && (d.note ?? '').contains('NOT ordered')) Text(d.note!, style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
                             if (d.failed) Text(d.note ?? 'VPS order failed', style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
                             if (d.status == 'test_registered') Text('Sandbox: not ordered at 20i', style: T.bodySm.copyWith(color: C.secondary)),
                           ]),
