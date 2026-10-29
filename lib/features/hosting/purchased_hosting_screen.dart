@@ -92,7 +92,7 @@ class _PurchasedHostingScreenState extends State<PurchasedHostingScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Purchased hosting', style: T.headlineLg),
+        Text('Purchased Hosting Packages', style: T.headlineLg),
         const SizedBox(height: 12),
         if (all != null)
           Row(children: [
@@ -111,7 +111,7 @@ class _PurchasedHostingScreenState extends State<PurchasedHostingScreen> {
                   : SortableTable<PurchasedHosting>(
                       rows: rows,
                       searchHint: 'Search hosting',
-                      emptyLabel: 'No hosting here yet. Buy a plan from Web Hosting.',
+                      emptyLabel: 'No hosting here yet. Buy one from Hosting Packages.',
                       searchText: (d) => '${d.planName} ${d.domain} ${d.clientName}',
                       toolbar: [
                         SegmentedButton<_Filter>(

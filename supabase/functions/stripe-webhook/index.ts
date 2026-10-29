@@ -378,7 +378,7 @@ Deno.serve(async (req) => {
   if (!claimed) return new Response("already handled");
 
   const live = Deno.env.get("DOMAIN_REGISTRATION_LIVE") === "true";
-  const { data: items } = await admin.from("domain_order_items").select("id, domain, years, price").eq("order_id", orderId);
+  const { data: items } = await admin.from("domain_order_items").select("id, domain, years, price, panel_item_id").eq("order_id", orderId);
   for (const item of (items ?? []) as (Item & { price: number })[]) {
     let status: "test_registered" | "registered" | "failed";
     let note: string | null = null;
@@ -410,5 +410,20 @@ Deno.serve(async (req) => {
 
   // The basket has been turned into an order, so empty the bought domains from it.
   await admin.from("domain_cart_items").delete().eq("user_id", claimed.user_id).in("domain", (items ?? []).map((i) => i.domain));
+
+  // Keep the 20i panel basket the same: whether the registration worked or failed, these items are no longer waiting there.
+  const panelIds = (items ?? []).map((i) => (i as { panel_item_id?: string | null }).panel_item_id).filter((x): x is string => !!x);
+  if (panelIds.length) {
+    try {
+      const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/stackcp-sso`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: claimed.user_id, removeBasket: panelIds }),
+      });
+      console.log("panel basket cleanup", res.status, (await res.text()).slice(0, 300));
+    } catch (e) {
+      console.error("panel basket cleanup failed", e); // never fail the webhook over this
+    }
+  }
   return new Response("ok");
 });

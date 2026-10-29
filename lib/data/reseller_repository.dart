@@ -1,3 +1,4 @@
+import '../core/format.dart';
 import 'models.dart';
 import 'repository.dart';
 
@@ -18,7 +19,7 @@ class License {
       : id = j['id'] as String,
         product = Product.fromJson(j['products'] as Map<String, dynamic>),
         unitPrice = (j['unit_price'] as num).toDouble(),
-        currency = (j['currency'] ?? '') as String,
+        currency = kCurrency,
         purchasedAt = DateTime.parse(j['purchased_at'] as String),
         clientId = j['client_id'] as String?,
         clientName = ((j['clients'] as Map<String, dynamic>?)?['name'] ?? '') as String,
@@ -43,7 +44,7 @@ class PurchasedDomain {
         domain = j['domain'] as String,
         years = j['years'] as int,
         unitPrice = (j['unit_price'] as num).toDouble(),
-        currency = (j['currency'] ?? '') as String,
+        currency = kCurrency,
         status = j['status'] as String,
         note = j['note'] as String?,
         purchasedAt = DateTime.parse(j['purchased_at'] as String),
@@ -70,7 +71,7 @@ class PurchasedHosting {
         domain = j['domain'] as String,
         months = j['months'] as int,
         unitPrice = (j['unit_price'] as num).toDouble(),
-        currency = (j['currency'] ?? '') as String,
+        currency = kCurrency,
         status = j['status'] as String,
         note = j['note'] as String?,
         purchasedAt = DateTime.parse(j['purchased_at'] as String),
@@ -99,7 +100,7 @@ class PurchasedVps {
         location = j['location'] as String,
         months = j['months'] as int,
         unitPrice = (j['unit_price'] as num).toDouble(),
-        currency = (j['currency'] ?? '') as String,
+        currency = kCurrency,
         status = j['status'] as String,
         note = j['note'] as String?,
         purchasedAt = DateTime.parse(j['purchased_at'] as String),
@@ -131,7 +132,7 @@ class PurchasedSsl {
         verification = j['verification'] as String,
         months = j['months'] as int,
         unitPrice = (j['unit_price'] as num).toDouble(),
-        currency = (j['currency'] ?? '') as String,
+        currency = kCurrency,
         status = j['status'] as String,
         note = j['note'] as String?,
         purchasedAt = DateTime.parse(j['purchased_at'] as String),

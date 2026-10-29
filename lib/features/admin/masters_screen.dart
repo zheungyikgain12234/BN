@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/format.dart';
 import '../../core/icon_registry.dart';
 import '../../core/sortable_table.dart';
 import '../../core/theme.dart';
@@ -7,7 +8,7 @@ import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/masters.dart';
 
-/// Admin: manage the lists the software form picks from (categories, tags, pricing models, currencies).
+/// Admin: manage the lists the software form picks from (categories, tags, pricing models).
 class MastersScreen extends StatelessWidget {
   const MastersScreen({super.key});
 
@@ -31,6 +32,8 @@ class MastersScreen extends StatelessWidget {
   }
 }
 
+bool _isNumber(MasterField f) => f.kind == MasterFieldKind.integer || f.kind == MasterFieldKind.decimal || f.kind == MasterFieldKind.money || f.kind == MasterFieldKind.percent;
+
 class _MasterTab extends StatefulWidget {
   const _MasterTab({required this.def});
   final MasterDef def;
@@ -52,6 +55,38 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   void initState() {
     super.initState();
     _load();
+    if (_isDomain) _checkPanel();
+  }
+
+  bool _refreshing = false;
+
+  /// Domain prices only: proof of who is logged in (the app user and the panel account that reads the 20i prices).
+  String _debug = 'Debug: checking the 20i panel login...';
+
+  Future<void> _checkPanel() async {
+    try {
+      final p = await domainCartRepo.panelDomains();
+      if (mounted) setState(() => _debug = 'Debug: signed in to the app as ${p.appUser} (super admin)  ·  20i panel login OK as ${p.panelUser}  ·  ${p.tlds.length} TLDs read: ${p.tlds.map((t) => '.${t.tld}').join(' ')}');
+    } catch (e) {
+      if (mounted) setState(() => _debug = 'Debug: 20i panel login FAILED: $e');
+    }
+  }
+
+  bool get _isDomain => def.table == 'domain_tld_prices';
+
+
+  /// Copies 20i's current yearly cost onto every TLD in the table, so selling prices follow 20i's price changes.
+  Future<void> _refreshCosts() async {
+    setState(() => _refreshing = true);
+    try {
+      final n = await withLoader(context, () => masterRepo.refreshDomainCosts(_rows ?? const []), message: 'Updating costs from 20i...');
+      await _load();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n == 0 ? 'Costs are already up to date.' : '$n cost(s) updated from 20i.'), behavior: SnackBarBehavior.floating));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   Future<void> _load() async {
@@ -65,7 +100,7 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final saved = await showDialog<bool>(context: context, builder: (_) => _MasterDialog(def: def, row: row));
+    final saved = await showDialog<bool>(context: context, builder: (_) => _MasterDialog(def: def, row: row, existingTlds: {for (final r in _rows ?? const <Map<String, dynamic>>[]) '${r['tld']}'}));
     if (saved == true) _load();
   }
 
@@ -105,10 +140,11 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
 
   Widget _cell(MasterField f, Map<String, dynamic> row, bool first) {
     final v = row[f.key];
-    final text = v == null || '$v'.isEmpty ? '—' : '$v';
+    final text = v == null || '$v'.isEmpty ? '—' : f.kind == MasterFieldKind.money ? money((v as num).toDouble()) : f.kind == MasterFieldKind.percent ? '$v%' : '$v';
     if (f.kind == MasterFieldKind.icon) {
       return Row(mainAxisSize: MainAxisSize.min, children: [Icon(categoryIcon(v as String?), size: 18, color: C.primary), const SizedBox(width: 8), Text(text)]);
     }
+    if (f.kind == MasterFieldKind.tld) return Text('.$text', style: T.labelLg);
     return Text(text, style: first ? T.labelLg : T.bodyMd);
   }
 
@@ -117,20 +153,23 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
     super.build(context);
     if (_error != null) return ErrorRetry(error: _error!, onRetry: _load);
     if (_rows == null) return const Center(child: CircularProgressIndicator());
-    return SortableTable<Map<String, dynamic>>(
+    final table = SortableTable<Map<String, dynamic>>(
       rows: _rows!,
       searchHint: 'Search ${def.title.toLowerCase()}',
       emptyLabel: 'No ${def.title.toLowerCase()} yet.',
       searchText: (r) => def.fields.map((f) => '${r[f.key] ?? ''}').join(' '),
-      toolbar: [FilledButton.icon(onPressed: () => _edit(), icon: const Icon(Icons.add, size: 18), label: Text('Add ${def.singular}'))],
+      toolbar: [
+        FilledButton.icon(onPressed: () => _edit(), icon: const Icon(Icons.add, size: 18), label: Text('Add ${def.singular}')),
+        if (_isDomain) OutlinedButton.icon(onPressed: _refreshing ? null : _refreshCosts, icon: const Icon(Icons.sync, size: 18), label: Text(_refreshing ? 'Updating...' : 'Update costs from 20i')),
+      ],
       columns: [
         for (var i = 0; i < def.fields.length; i++)
           TableCol<Map<String, dynamic>>(
             label: def.fields[i].label,
-            numeric: def.fields[i].kind == MasterFieldKind.integer || def.fields[i].kind == MasterFieldKind.decimal,
+            numeric: _isNumber(def.fields[i]),
             sortValue: (r) {
               final v = r[def.fields[i].key];
-              return def.fields[i].kind == MasterFieldKind.integer || def.fields[i].kind == MasterFieldKind.decimal ? (v as num?) ?? 0 : '${v ?? ''}'.toLowerCase();
+              return _isNumber(def.fields[i]) ? (v as num?) ?? -1 : '${v ?? ''}'.toLowerCase();
             },
             cell: (r) => _cell(def.fields[i], r, i == 0),
           ),
@@ -140,13 +179,22 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
         IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline, size: 18, color: C.error), onPressed: () => _delete(r)),
       ],
     );
+    if (!_isDomain) return table;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SelectableText(_debug, style: T.bodySm.copyWith(color: _debug.contains('FAILED') ? C.error : C.tertiary)),
+      const SizedBox(height: 12),
+      Expanded(child: table),
+    ]);
   }
 }
 
 class _MasterDialog extends StatefulWidget {
-  const _MasterDialog({required this.def, this.row});
+  const _MasterDialog({required this.def, this.row, this.existingTlds = const {}});
   final MasterDef def;
   final Map<String, dynamic>? row;
+
+  /// Extensions that already have a price (they are not offered again when adding).
+  final Set<String> existingTlds;
 
   @override
   State<_MasterDialog> createState() => _MasterDialogState();
@@ -162,6 +210,26 @@ class _MasterDialogState extends State<_MasterDialog> {
       f.key: categoryIcons.containsKey(widget.row?[f.key]) ? widget.row![f.key] as String : null,
   };
   bool _saving = false;
+
+  /// Domain prices: 20i's yearly cost for the extension picked (the cost column is never typed).
+  double? _cost;
+
+  /// Domain prices: choose the extension from 20i's own list, with a search box.
+  Future<void> _pickTld() async {
+    try {
+      final all = await withLoader(context, domainCartRepo.tldsFrom20i, message: 'Loading extensions from 20i...');
+      if (!mounted) return;
+      final options = all.where((t) => !widget.existingTlds.contains(t.tld)).toList();
+      final chosen = await showDialog<({String tld, double? cost})>(context: context, builder: (_) => _TldPickerDialog(options: options));
+      if (chosen == null) return;
+      setState(() {
+        _text['tld']!.text = chosen.tld;
+        _cost = chosen.cost;
+      });
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
 
   @override
   void dispose() {
@@ -184,7 +252,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// VPS add-on prices: choose a cPanel licence, backup or disk from the panel shop's list.
   Future<void> _pickVpsAddon() async {
     try {
-      final addons = await vpsCartRepo.panelAddons();
+      final addons = await withLoader(context, vpsCartRepo.panelAddons);
       if (!mounted) return;
       final chosen = await showDialog<({String spec, String label, int months, double price})>(
         context: context,
@@ -208,7 +276,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// SSL prices: choose a certificate from the panel shop's list (read through the panel login).
   Future<void> _pickSsl() async {
     try {
-      final plans = await sslCartRepo.panelCatalogue();
+      final plans = await withLoader(context, sslCartRepo.panelCatalogue);
       if (!mounted) return;
       final chosen = await showDialog<({String code, String label, int months, double price})>(
         context: context,
@@ -232,7 +300,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// VPS prices / operating systems: choose from the panel shop's list (read through the panel login).
   Future<void> _pickVps() async {
     try {
-      final cat = await vpsCartRepo.panelCatalogue();
+      final cat = await withLoader(context, vpsCartRepo.panelCatalogue);
       if (!mounted) return;
       final isPlan = widget.def.table == 'vps_plan_prices';
       final options = isPlan
@@ -266,7 +334,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// Hosting prices: choose the plan from 20i's own list instead of typing its id.
   Future<void> _pick20iPlan() async {
     try {
-      final plans = await hostingCartRepo.plansFrom20i();
+      final plans = await withLoader(context, hostingCartRepo.plansFrom20i);
       if (!mounted) return;
       final chosen = await showDialog<({String id, String name})>(
         context: context,
@@ -299,7 +367,13 @@ class _MasterDialogState extends State<_MasterDialog> {
             values[f.key] = int.tryParse(_text[f.key]!.text.trim()) ?? 0;
           case MasterFieldKind.decimal:
             values[f.key] = double.tryParse(_text[f.key]!.text.trim()) ?? 0;
-          case MasterFieldKind.text when f.key == 'tld':
+          case MasterFieldKind.money when f.readOnly:
+            if (f.key == 'cost_per_year' && _cost != null) values[f.key] = _cost; // only changes when a new extension was picked
+          case MasterFieldKind.percent:
+            values[f.key] = double.parse(_text[f.key]!.text.trim()); // validated as a number >= 0 by the form
+          case MasterFieldKind.money:
+            values[f.key] = double.tryParse(_text[f.key]!.text.trim()) ?? 0;
+          case MasterFieldKind.tld:
             values[f.key] = _text[f.key]!.text.trim().toLowerCase().replaceFirst(RegExp(r'^\.'), '');
           case MasterFieldKind.text:
             final t = _text[f.key]!.text.trim();
@@ -327,11 +401,31 @@ class _MasterDialogState extends State<_MasterDialog> {
         child: Form(
           key: _form,
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            for (final f in def.fields) ...[
+            for (final f in def.fields.where((f) => !f.readOnly)) ...[
               LabeledField(
                 label: f.label,
                 required: f.required,
-                child: f.kind == MasterFieldKind.icon
+                child: f.kind == MasterFieldKind.tld
+                    ? FormField<String>(
+                        initialValue: _text[f.key]!.text,
+                        validator: (_) => _text[f.key]!.text.isEmpty ? '${f.label} is required' : null,
+                        builder: (state) {
+                          final tld = _text[f.key]!.text;
+                          // An existing price keeps its extension; a new one is picked from 20i's list.
+                          final locked = widget.row != null;
+                          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            InkWell(
+                              onTap: locked ? null : _pickTld,
+                              child: InputDecorator(
+                                decoration: fieldDecoration().copyWith(errorText: state.errorText, suffixIcon: locked ? null : const Icon(Icons.arrow_drop_down)),
+                                child: tld.isEmpty ? dropdownHint(f.hint) : Text('.$tld', style: T.bodyMd),
+                              ),
+                            ),
+                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('20i cost: ${money(_cost!)} per year', style: T.bodySm.copyWith(color: C.secondary))),
+                          ]);
+                        },
+                      )
+                    : f.kind == MasterFieldKind.icon
                     ? DropdownButtonFormField<String?>(
                         initialValue: _icon[f.key],
                         isExpanded: true,
@@ -346,9 +440,17 @@ class _MasterDialogState extends State<_MasterDialog> {
                     : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         TextFormField(
                           controller: _text[f.key],
-                          keyboardType: f.kind == MasterFieldKind.integer || f.kind == MasterFieldKind.decimal ? const TextInputType.numberWithOptions(decimal: true) : null,
-                          decoration: fieldDecoration(hint: f.hint),
-                          validator: f.required ? (v) => (v == null || v.trim().isEmpty) ? '${f.label} is required' : null : null,
+                          keyboardType: _isNumber(f) ? const TextInputType.numberWithOptions(decimal: true) : null,
+                          decoration: fieldDecoration(hint: f.hint).copyWith(prefixText: f.kind == MasterFieldKind.money ? '$kCurrency ' : null, suffixText: f.kind == MasterFieldKind.percent ? '%' : null),
+                          validator: (v) {
+                            final t = v?.trim() ?? '';
+                            if (t.isEmpty) return f.required ? '${f.label} is required' : null;
+                            if (f.kind == MasterFieldKind.percent) {
+                              final n = double.tryParse(t);
+                              if (n == null || n < 0) return 'Enter a number, 0 or more';
+                            }
+                            return null;
+                          },
                         ),
                         if (f.key == _pickerField)
                           TextButton.icon(
@@ -426,6 +528,54 @@ class _ReassignDialogState extends State<_ReassignDialog> {
           child: const Text('Reassign & delete'),
         ),
       ],
+    );
+  }
+}
+
+/// Searchable list of the extensions 20i offers; pops the one tapped.
+class _TldPickerDialog extends StatefulWidget {
+  const _TldPickerDialog({required this.options});
+  final List<({String tld, double? cost})> options;
+
+  @override
+  State<_TldPickerDialog> createState() => _TldPickerDialogState();
+}
+
+class _TldPickerDialogState extends State<_TldPickerDialog> {
+  String _q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _q.trim().toLowerCase().replaceFirst(RegExp(r'^\.'), '');
+    final shown = widget.options.where((t) => t.tld.contains(q)).toList();
+    return AlertDialog(
+      title: const Text('Select a TLD'),
+      content: SizedBox(
+        width: 380,
+        height: 420,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          TextField(
+            autofocus: true,
+            decoration: fieldDecoration(hint: 'Search, e.g. com or uk', prefix: Icons.search),
+            onChanged: (v) => setState(() => _q = v),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: shown.isEmpty
+                ? Center(child: Text(widget.options.isEmpty ? 'No more extensions to add.' : 'No match.', style: T.bodyMd))
+                : ListView.builder(
+                    itemCount: shown.length,
+                    itemBuilder: (_, i) => ListTile(
+                      dense: true,
+                      title: Text('.${shown[i].tld}'),
+                      trailing: shown[i].cost == null ? null : Text('${money(shown[i].cost!)} / yr', style: T.bodySm.copyWith(color: C.secondary)),
+                      onTap: () => Navigator.pop(context, shown[i]),
+                    ),
+                  ),
+          ),
+        ]),
+      ),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
     );
   }
 }

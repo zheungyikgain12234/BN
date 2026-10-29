@@ -2,9 +2,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/format.dart';
 import '../core/image_picker.dart';
 import 'models.dart';
 import 'repository.dart';
+import 'stackcp_sso.dart';
 
 const _productSelect = '*, software_categories(name, icon), tenants(name)';
 const _bucket = 'catalog-media';
@@ -143,7 +145,7 @@ class CartRepository {
 /// Domains in the basket (one row per user + domain; adding again replaces the duration).
 class DomainCartRepository {
   Future<List<DomainPrice>> prices() async {
-    final rows = await sb.from('domain_tld_prices').select().order('tld').order('years');
+    final rows = await sb.from('domain_prices').select().order('tld');
     return rows.map<DomainPrice>(DomainPrice.fromJson).toList();
   }
 
@@ -156,25 +158,63 @@ class DomainCartRepository {
       for (final i in items)
         () {
           final tld = i.domain.toLowerCase().split('.').skip(1).join('.');
-          final p = prices.where((x) => x.tld == tld && x.years == i.years).firstOrNull;
-          return p == null ? i : DomainCartItem(id: i.id, domain: i.domain, years: i.years, price: p.price, currency: p.currency);
+          final p = prices.where((x) => x.tld == tld).firstOrNull;
+          return p == null ? i : DomainCartItem(id: i.id, domain: i.domain, years: i.years, price: p.total(i.years), currency: kCurrency);
         }(),
     ];
   }
 
-  Future<void> add(String domain, DomainPrice p) async {
-    await sb.from('domain_cart_items').upsert({'domain': domain, 'years': p.years, 'price': p.price, 'currency': p.currency}, onConflict: 'user_id,domain');
+  Future<void> add(String domain, DomainPrice p, int years) async {
+    await sb.from('domain_cart_items').upsert({'domain': domain, 'years': years, 'price': p.total(years), 'currency': kCurrency}, onConflict: 'user_id,domain');
     await CartState.instance.refresh();
   }
 
-  Future<void> remove(String id) async {
+  /// The domain extensions the 20i shop sells, with 20i's yearly cost, plus who was logged in (for the debug line).
+  /// Read through the same panel login Add to Basket uses (stackcp-sso, as the signed-in user), because the public 20i API
+  /// has no price list.
+  Future<({String appUser, String panelUser, List<({String tld, double cost})> tlds})> panelDomains() async {
+    final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
+    final data = res.data as Map?;
+    if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
+    if (data?['sso'] != true) throw '${data?['reason'] ?? 'Panel login failed'}';
+    final c = (data!['catalogue'] as Map?) ?? const {};
+    return (
+      appUser: sb.auth.currentUser?.email ?? '?',
+      panelUser: '${data['panelUser']}',
+      tlds: [for (final d in (c['domains'] as List? ?? const [])) (tld: '${d['tld']}', cost: (d['cost'] as num).toDouble())],
+    );
+  }
+
+  Future<List<({String tld, double cost})>> tldsFrom20i() async => (await panelDomains()).tlds;
+
+  /// The panel-basket ids of the given cart rows (null = every row of this user). Best effort: a missing id is skipped.
+  Future<List<String>> _panelIds({String? id}) async {
+    final q = sb.from('domain_cart_items').select('panel_item_id');
+    final rows = await (id == null ? q.eq('user_id', sb.auth.currentUser!.id) : q.eq('id', id));
+    return [for (final r in rows) if (r['panel_item_id'] != null) '${r['panel_item_id']}'];
+  }
+
+  /// The cart row id of a domain already in the basket (null if it isn't there).
+  Future<String?> idOf(String domain) async =>
+      (await sb.from('domain_cart_items').select('id').eq('domain', domain).eq('user_id', sb.auth.currentUser!.id).maybeSingle())?['id'] as String?;
+
+  /// Saves the 20i panel basket id of a domain that was just mirrored there.
+  Future<void> setPanelId(String domain, String panelId) =>
+      sb.from('domain_cart_items').update({'panel_item_id': panelId}).eq('domain', domain).eq('user_id', sb.auth.currentUser!.id);
+
+  /// Removes from our basket and, so the two stay the same, from the 20i panel basket. Returns a warning if the panel part failed.
+  Future<String?> remove(String id) async {
+    final why = await removeFromPanelBasket(await _panelIds(id: id));
     await sb.from('domain_cart_items').delete().eq('id', id);
     await CartState.instance.refresh();
+    return why;
   }
 
-  Future<void> clear() async {
+  Future<String?> clear() async {
+    final why = await removeFromPanelBasket(await _panelIds());
     await sb.from('domain_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
     await CartState.instance.refresh();
+    return why;
   }
 
   /// Saves the basket as an order and returns the Stripe payment page to send the browser to.

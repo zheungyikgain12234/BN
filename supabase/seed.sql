@@ -1,6 +1,7 @@
--- Sample data: companies, masters (categories, pricing models, currencies, tags), software, screenshots and comments.
--- Run in the Supabase SQL editor AFTER schema.sql, multitenant.sql and catalog.sql. Safe to re-run (never duplicates).
--- Every value the app shows comes from these tables; nothing is hardcoded in the Flutter code.
+-- Sample data: companies, masters (categories, pricing models, tags), software, screenshots and comments.
+-- Run in the Supabase SQL editor AFTER schema.sql. Safe to re-run (never duplicates). All prices are SGD.
+-- Also creates two test users (see 1b).
+-- No domain prices are seeded on purpose: add them yourself in Master Data > Domain prices (picked from 20i).
 
 -- 1. Companies (the company screen, registration dropdown and admin Companies page read these)
 insert into public.tenants (name, code, domain, plan, seats_active) values
@@ -8,6 +9,52 @@ insert into public.tenants (name, code, domain, plan, seats_active) values
   ('Northwind Traders',                     'TEN-20417-US', 'northwind.example', 'business',   58),
   ('Contoso Retail Group',                  'TEN-77310-UK', 'contoso.example',   'starter',    12)
 on conflict do nothing;
+
+-- 1b. Test users (password for both: alpine123). Safe to re-run: existing emails are left alone.
+--   dtgainzgain@gmail.com   reseller admin of Gain City Digital Innovation Pte Ltd
+--   zheungyik2024@gmail.com super admin (belongs to no company)
+do $$
+declare
+  v_company uuid := (select id from public.tenants where lower(name) = lower('Gain City Digital Innovation Pte Ltd'));
+  v_id uuid;
+  u record;
+begin
+  for u in select * from (values
+    ('dtgainzgain@gmail.com',   'Gain City Admin', true),
+    ('zheungyik2024@gmail.com', 'Super Admin',     false)
+  ) as t(email, full_name, in_company)
+  loop
+    select id into v_id from auth.users where email = u.email;
+    if v_id is null then
+      v_id := gen_random_uuid();
+      insert into auth.users (
+        instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+        raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+        confirmation_token, recovery_token, email_change, email_change_token_new
+      ) values (
+        '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated', u.email,
+        crypt('alpine123', gen_salt('bf')), now(),
+        '{"provider":"email","providers":["email"]}',
+        jsonb_build_object('full_name', u.full_name) || case when u.in_company then jsonb_build_object('company_id', v_company) else '{}'::jsonb end,
+        now(), now(), '', '', '', ''
+      );
+      insert into auth.identities (id, user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+      values (gen_random_uuid(), v_id, v_id::text, 'email',
+              jsonb_build_object('sub', v_id::text, 'email', u.email, 'email_verified', true), now(), now(), now());
+    else
+      update auth.users set encrypted_password = crypt('alpine123', gen_salt('bf')) where id = v_id; -- reset the password
+    end if;
+    -- a user kept from before schema.sql reset has no profile row any more
+    insert into public.profiles (id, full_name) values (v_id, u.full_name) on conflict do nothing;
+
+    if u.in_company then
+      insert into public.tenant_members (tenant_id, user_id, role) values (v_company, v_id, 'admin')
+      on conflict (tenant_id, user_id) do update set role = 'admin';
+    else
+      insert into public.app_admins (user_id) values (v_id) on conflict do nothing;
+    end if;
+  end loop;
+end $$;
 
 -- 2. Masters
 -- Categories (store filter chips). `icon` is a Material icon name resolved by the app.
@@ -27,10 +74,6 @@ insert into public.pricing_models (name, sort_order) values
   ('Per workspace', 50), ('Flat fee', 60), ('Usage based', 70)
 on conflict do nothing;
 
-insert into public.currencies (code, name, sort_order) values
-  ('USD', 'US Dollar', 10), ('SGD', 'Singapore Dollar', 20), ('GBP', 'Pound Sterling', 30),
-  ('EUR', 'Euro', 40), ('AUD', 'Australian Dollar', 50), ('MYR', 'Malaysian Ringgit', 60)
-on conflict do nothing;
 
 insert into public.software_tags (name) values
   ('Office'), ('Email'), ('Teams'), ('EDR'), ('Antivirus'), ('Compliance'), ('AI'), ('Search'), ('Documents'),
@@ -48,11 +91,11 @@ from (values
   (null, 'Productivity', 'Microsoft 365 Business Premium',
    'Office apps, Teams, email and advanced security for growing teams.',
    'Microsoft 365 Business Premium combines Word, Excel, PowerPoint, Outlook and Teams with device management, threat protection and data-loss prevention in one subscription. Ideal for organisations up to 300 users that need productivity and security together.',
-   '2024.3', 'M365-BP-001', 'Per user', 22.00, 'USD', 'Office,Email,Teams', 10),
+   '2024.3', 'M365-BP-001', 'Per user', 22.00, 'SGD', 'Office,Email,Teams', 10),
   (null, 'Security', 'Defender Endpoint Protect',
    'Next-generation endpoint protection with automated investigation.',
    'Cloud-delivered antivirus, endpoint detection and response and attack-surface reduction for Windows, macOS, Linux and mobile devices, managed from a single console.',
-   '5.8', 'SEC-DEF-014', 'Per device', 5.20, 'USD', 'EDR,Antivirus,Compliance', 20),
+   '5.8', 'SEC-DEF-014', 'Per device', 5.20, 'SGD', 'EDR,Antivirus,Compliance', 20),
   ('Gain City Digital Innovation Pte Ltd', 'AI & Automation', 'Gain City AI Co-Pilot',
    'An AI assistant that answers questions from your own documents.',
    'Connects to SharePoint, OneDrive and your file servers, then lets staff ask natural-language questions with cited answers. Role-aware, so people only see what they are allowed to see.',
@@ -68,23 +111,23 @@ from (values
   ('Northwind Traders', 'Analytics', 'Northwind Insight Studio',
    'Self-service dashboards for sales, stock and supplier performance.',
    'Drag-and-drop dashboards over your trading data with scheduled email reports, drill-down and row-level security by region.',
-   '6.0', 'NW-ANL-600', 'Per seat', 35.00, 'USD', 'BI,Dashboards,Reporting', 10),
+   '6.0', 'NW-ANL-600', 'Per seat', 35.00, 'SGD', 'BI,Dashboards,Reporting', 10),
   ('Northwind Traders', 'Marketing', 'Campaign Pilot',
    'Plan, schedule and measure email and social campaigns.',
    'A single calendar for email, social and paid campaigns with audience segments, A/B testing and attribution reports.',
-   '4.3', 'NW-MKT-430', 'Per workspace', 99.00, 'USD', 'Email,Social,Attribution', 20),
+   '4.3', 'NW-MKT-430', 'Per workspace', 99.00, 'SGD', 'Email,Social,Attribution', 20),
   ('Northwind Traders', 'Developer Tools', 'Pipeline Runner',
    'Hosted CI/CD with build caching and approval gates.',
    'Run builds and deployments on managed runners with secrets management, environment approvals and audit logs.',
-   '1.9', 'NW-DEV-190', 'Usage based', 0.01, 'USD', 'CI,CD,Automation', 30),
+   '1.9', 'NW-DEV-190', 'Usage based', 0.01, 'SGD', 'CI,CD,Automation', 30),
   ('Contoso Retail Group', 'Finance & ERP', 'Retail POS Cloud',
    'Point of sale with live stock levels across every store.',
    'Cloud POS for tills and tablets with offline mode, loyalty, returns and end-of-day reconciliation by store.',
-   '8.2', 'CT-POS-820', 'Per store', 79.00, 'GBP', 'POS,Retail,Inventory', 10),
+   '8.2', 'CT-POS-820', 'Per store', 79.00, 'SGD', 'POS,Retail,Inventory', 10),
   ('Contoso Retail Group', 'Productivity', 'Shift Planner',
    'Staff rota, swaps and time-off requests in one app.',
    'Build rotas from demand forecasts, let staff swap shifts and request leave, and export hours straight to payroll.',
-   '2.1', 'CT-HR-210', 'Per seat', 4.50, 'GBP', 'Rota,HR,Payroll', 20)
+   '2.1', 'CT-HR-210', 'Per seat', 4.50, 'SGD', 'Rota,HR,Payroll', 20)
 ) as v(company, category, name, description, about, version, sku, pricing_model, price, currency, tags, sort_order)
 left join public.tenants t on lower(t.name) = lower(v.company)
 join public.software_categories c on lower(c.name) = lower(v.category)
@@ -113,6 +156,7 @@ select p.id, (select id from public.profiles order by id limit 1),
 from public.products p
 where exists (select 1 from public.profiles)
   and not exists (select 1 from public.product_comments c where c.product_id = p.id);
+
 
 -- 6. Optional: make a registered user a company admin (can add software for their company)
 -- update public.tenant_members set role = 'admin'

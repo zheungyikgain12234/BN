@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app_router.dart';
+import '../../core/format.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
@@ -13,6 +15,7 @@ class DomainResult {
   DomainResult(this.domain, this.available);
   final String domain;
   final bool available;
+
 
   /// Extension without the dot: "com", "co.uk".
   String get tld => domain.substring(domain.indexOf('.') + 1);
@@ -32,11 +35,11 @@ class _DomainSearchApiScreenState extends State<DomainSearchApiScreen> {
   String? _searched;
   List<DomainResult> _results = const [];
 
-  /// Selling prices per extension, from Master Data. Only these extensions are offered.
-  Map<String, List<DomainPrice>> _prices = const {};
+  /// Selling prices per extension (SGD per year), from Master Data. Only these extensions are shown.
+  Map<String, DomainPrice> _prices = const {};
 
-  /// Duration chosen per domain (defaults to the shortest).
-  final Map<String, DomainPrice> _picked = {};
+  /// Years typed per domain (defaults to 1; null while the box is empty or invalid).
+  final Map<String, int?> _years = {};
   final Set<String> _added = {};
 
   @override
@@ -50,25 +53,31 @@ class _DomainSearchApiScreenState extends State<DomainSearchApiScreen> {
     if (term.isEmpty || _loading) return;
     setState(() => _loading = true);
     try {
-      final prices = <String, List<DomainPrice>>{};
-      for (final p in await domainCartRepo.prices()) {
-        prices.putIfAbsent(p.tld, () => []).add(p);
-      }
-      final res = await sb.functions.invoke('domain-search', body: {'term': term});
+      final prices = {for (final p in await domainCartRepo.prices()) p.tld: p};
+      final typed = term.toLowerCase().replaceFirst(RegExp(r'^https?://'), '').replaceFirst(RegExp(r'^www\.'), '').split('/').first;
+      final label = typed.split('.').first;
+      if (!mounted) return;
+      // Search the bare name so 20i checks every extension, not only the one that was typed.
+      final res = await withLoader(context, () => sb.functions.invoke('domain-search', body: {'term': label, 'tlds': prices.keys.toList()}), message: 'Searching 20i...');
       final data = res.data as Map?;
       if (data?['error'] != null) throw Exception(data!['error']);
       // 20i can return just the extension (".uk"), so put the searched name in front.
-      final label = term.toLowerCase().replaceFirst(RegExp(r'^https?://'), '').replaceFirst(RegExp(r'^www\.'), '').split('/').first.split('.').first;
       String full(Object? d) => '$d'.startsWith('.') ? '$label$d' : '$d';
+      // Only extensions in Master Data are listed; taken names stay in the list, labelled.
       final list = [
         for (final r in (data?['results'] as List? ?? const []))
-          if (prices.containsKey(DomainResult(full(r['domain']), false).tld)) DomainResult(full(r['domain']), r['available'] == true),
-      ]..sort((a, b) => a.available == b.available ? 0 : (a.available ? -1 : 1));
+          if (prices.containsKey(DomainResult(full(r['domain']), false).tld))
+          DomainResult(full(r['domain']), r['available'] == true),
+      ]..sort((a, b) {
+          int rank(DomainResult r) => r.domain == typed ? 0 : (r.available ? 1 : 2); // the exact name typed first, then free, then taken
+          final c = rank(a).compareTo(rank(b));
+          return c != 0 ? c : a.domain.compareTo(b.domain);
+        });
       if (!mounted) return;
       setState(() {
         _prices = prices;
         _results = list;
-        _picked.clear();
+        _years.clear();
         _searched = term;
       });
     } catch (e) {
@@ -78,43 +87,56 @@ class _DomainSearchApiScreenState extends State<DomainSearchApiScreen> {
     }
   }
 
-  Future<void> _addToBasket(DomainResult r, DomainPrice p) async {
+  Future<void> _addToBasket(DomainResult r, DomainPrice p, int years) async {
     try {
-      await domainCartRepo.add(r.domain, p);
-      if (mounted) setState(() => _added.add(r.domain));
-      // Mirror into the hosting panel's basket so the panel checkout sees it too.
-      final why = await addDomainsToPanelBasket([(name: r.domain, years: p.years, tld: p.tld, currency: p.currency, price: p.price)]);
-      if (why != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to your basket, but not to the hosting panel basket: $why'), behavior: SnackBarBehavior.floating));
+      // Adding again replaces the duration, so drop the old copy from the 20i panel basket first (no duplicates there).
+      final result = await withLoader(context, () async {
+        final old = await domainCartRepo.idOf(r.domain);
+        if (old != null) await domainCartRepo.remove(old);
+        await domainCartRepo.add(r.domain, p, years);
+        // Mirror into the hosting panel's basket so the panel checkout sees it too.
+        final res = await addDomainsToPanelBasket([(name: r.domain, years: years, tld: p.tld, currency: kCurrency, price: p.total(years))]);
+        final panelId = res.ids[r.domain];
+        if (panelId != null) await domainCartRepo.setPanelId(r.domain, panelId);
+        return res;
+      }, message: 'Adding to your basket...');
+      if (!mounted) return;
+      setState(() => _added.add(r.domain));
+      if (result.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to your basket, but not to the hosting panel basket: ${result.error}'), behavior: SnackBarBehavior.floating));
       }
     } catch (e) {
       if (mounted) showError(context, e);
     }
   }
 
-  /// Duration picker, price and Add to Basket for an available domain.
+  /// Years box, price and Add to Basket for an available domain. Any number of years can be typed.
   List<Widget> _buy(DomainResult r) {
-    final options = _prices[r.tld]!;
-    final picked = _picked[r.domain] ?? options.first;
+    final price = _prices[r.tld]!;
+    final years = _years.containsKey(r.domain) ? _years[r.domain] : 1;
+    final valid = years != null && years >= 1 && years <= maxDomainYears;
     final inBasket = _added.contains(r.domain);
     return [
       SizedBox(
-        width: 230,
-        child: DropdownButtonFormField<DomainPrice>(
-          initialValue: picked,
-          isExpanded: true,
-          decoration: fieldDecoration(),
-          items: [for (final p in options) DropdownMenuItem(value: p, child: Text(p.label, overflow: TextOverflow.ellipsis))],
-          onChanged: (p) => setState(() {
-            _picked[r.domain] = p!;
+        width: 96,
+        child: TextFormField(
+          key: ValueKey('years-${r.domain}'),
+          initialValue: '${years ?? ''}',
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: fieldDecoration(hint: 'Years').copyWith(suffixText: 'yr', errorText: valid ? null : '1-$maxDomainYears'),
+          onChanged: (v) => setState(() {
+            _years[r.domain] = int.tryParse(v);
             _added.remove(r.domain);
           }),
         ),
       ),
       const SizedBox(width: 12),
+      SizedBox(width: 120, child: Text(valid ? money(price.total(years)) : '—', style: T.labelLg, textAlign: TextAlign.end)),
+      const SizedBox(width: 12),
       inBasket
           ? OutlinedButton.icon(onPressed: () => context.go(Routes.cart), icon: const Icon(Icons.check, size: 16), label: const Text('In basket'))
-          : PrimaryButton(label: 'Add to Basket', icon: Icons.add_shopping_cart, expand: false, onPressed: () => _addToBasket(r, picked)),
+          : PrimaryButton(label: 'Add to Basket', icon: Icons.add_shopping_cart, expand: false, onPressed: valid ? () => _addToBasket(r, price, years) : null),
     ];
   }
 
@@ -142,7 +164,7 @@ class _DomainSearchApiScreenState extends State<DomainSearchApiScreen> {
       ),
       const SizedBox(height: 16),
       if (_searched != null && _results.isEmpty && !_loading)
-        AppCard(child: Text(_prices.isEmpty ? 'No domain prices set up yet. Add them in Master Data > Domain prices.' : 'No results for "$_searched".', style: T.bodyMd)),
+        AppCard(child: Text('No results for "$_searched".', style: T.bodyMd)),
       for (final r in _results)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -150,8 +172,13 @@ class _DomainSearchApiScreenState extends State<DomainSearchApiScreen> {
             child: Row(children: [
               Icon(r.available ? Icons.check_circle : Icons.cancel, color: r.available ? C.primary : C.outline, size: 20),
               const SizedBox(width: 12),
-              Expanded(child: Text(r.domain, style: T.headlineSm)),
-              if (r.available) ..._buy(r) else const Pill('Taken'),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(r.domain, style: T.headlineSm),
+                  Text("${money(_prices[r.tld]!.pricePerYear)} per year", style: T.bodySm.copyWith(color: C.secondary)),
+                ]),
+              ),
+              if (!r.available) const Pill('Already taken') else ..._buy(r),
             ]),
           ),
         ),

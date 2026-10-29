@@ -15,4 +15,7 @@ String formatDate(DateTime d) {
   return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
 }
 
-String money(double v, [String currency = '']) => '${currency.isEmpty ? '' : '$currency '}${v.toStringAsFixed(2)}';
+String money(double v, [String? _]) => '$kCurrency ${v.toStringAsFixed(2)}';
+
+/// Every price in the system is in Singapore dollars.
+const kCurrency = 'SGD';

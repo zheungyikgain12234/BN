@@ -1,21 +1,28 @@
+import 'catalog_repository.dart';
 import 'repository.dart';
 
-enum MasterFieldKind { text, integer, decimal, icon }
+enum MasterFieldKind { text, integer, decimal, icon, tld, money, percent }
 
 class MasterField {
-  const MasterField(this.key, this.label, {this.kind = MasterFieldKind.text, this.required = false, this.hint = ''});
+  const MasterField(this.key, this.label, {this.kind = MasterFieldKind.text, this.required = false, this.hint = '', this.readOnly = false});
   final String key, label, hint;
   final MasterFieldKind kind;
   final bool required;
+
+  /// Shown in the table but not typed in the form (it is filled in from 20i).
+  final bool readOnly;
 }
 
 /// Describes one master table so a single screen and form can manage all of them.
 class MasterDef {
-  const MasterDef({required this.table, required this.title, required this.singular, required this.fields, required this.orderBy, required this.usageKind, required this.valueKey});
+  const MasterDef({required this.table, required this.title, required this.singular, required this.fields, required this.orderBy, required this.usageKind, required this.valueKey, this.readFrom});
   final String table, title, singular, orderBy;
 
   /// How apps reference this master (see public.reassign_master) and which column holds that reference.
   final String usageKind, valueKey;
+
+  /// A view to read the rows from when it adds computed columns (writes still go to [table]).
+  final String? readFrom;
   final List<MasterField> fields;
 
   /// Column shown as the row's name (the first field).
@@ -56,35 +63,24 @@ const masterDefs = <MasterDef>[
     ],
   ),
   MasterDef(
-    table: 'currencies',
-    title: 'Currencies',
-    singular: 'currency',
-    orderBy: 'code',
-    usageKind: 'currency',
-    valueKey: 'code',
-    fields: [
-      MasterField('code', 'Code', required: true, hint: 'USD'),
-      MasterField('name', 'Name', hint: 'US Dollar'),
-    ],
-  ),
-  MasterDef(
     table: 'domain_tld_prices',
+    readFrom: 'domain_prices',
     title: 'Domain prices',
     singular: 'domain price',
     orderBy: 'tld',
     usageKind: '',
     valueKey: 'id',
     fields: [
-      MasterField('tld', 'Extension', required: true, hint: 'com or co.uk (no dot)'),
-      MasterField('years', 'Years', kind: MasterFieldKind.integer, required: true, hint: '1'),
-      MasterField('price', 'Price (whole duration)', kind: MasterFieldKind.decimal, required: true, hint: '21.74'),
-      MasterField('currency', 'Currency', required: true, hint: 'USD'),
+      MasterField('tld', 'TLD', kind: MasterFieldKind.tld, required: true, hint: 'Select an extension'),
+      MasterField('cost_per_year', 'Cost per year (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
+      MasterField('price_per_year', 'Selling price per year', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
     table: 'hosting_plan_prices',
-    title: 'Hosting prices',
-    singular: 'hosting price',
+    title: 'Hosting Package prices',
+    singular: 'hosting package price',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
@@ -93,7 +89,6 @@ const masterDefs = <MasterDef>[
       MasterField('package_type_id', '20i plan id / shop code', required: true, hint: 'Pick from 20i, or paste a shop code'),
       MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '12'),
       MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '60.00'),
-      MasterField('currency', 'Currency', required: true, hint: 'SGD'),
     ],
   ),
   MasterDef(
@@ -108,7 +103,6 @@ const masterDefs = <MasterDef>[
       MasterField('vps_type', '20i VPS type', required: true, hint: 'Pick from 20i, or vps-a'),
       MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '1'),
       MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '25.00'),
-      MasterField('currency', 'Currency', required: true, hint: 'SGD'),
     ],
   ),
   MasterDef(
@@ -123,7 +117,6 @@ const masterDefs = <MasterDef>[
       MasterField('class_code', '20i class code', required: true, hint: 'tucows-rapidssl, tucows-rapidssl_wildcard or tucows-truebizid_ev'),
       MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '12'),
       MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '63.96'),
-      MasterField('currency', 'Currency', required: true, hint: 'SGD'),
     ],
   ),
   MasterDef(
@@ -138,7 +131,6 @@ const masterDefs = <MasterDef>[
       MasterField('product_spec', '20i add-on code', required: true, hint: 'Pick from 20i, or vps_addon-cpanelpro, vps_addon-backup, vps_addon-disk100GB'),
       MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '1'),
       MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '51.17'),
-      MasterField('currency', 'Currency', required: true, hint: 'SGD'),
     ],
   ),
   MasterDef(
@@ -157,7 +149,7 @@ const masterDefs = <MasterDef>[
 
 class MasterRepository {
   Future<List<Map<String, dynamic>>> list(MasterDef def) async {
-    final rows = await sb.from(def.table).select().order(def.orderBy).order(def.nameKey);
+    final rows = await sb.from(def.readFrom ?? def.table).select().order(def.orderBy).order(def.nameKey);
     return rows.map((r) => Map<String, dynamic>.from(r)).toList();
   }
 
@@ -180,6 +172,19 @@ class MasterRepository {
   Future<void> reassignAndDelete(MasterDef def, Map<String, dynamic> row, String? replacement) async {
     await sb.rpc('reassign_master', params: {'kind': def.usageKind, 'old_value': '${row[def.valueKey]}', 'new_value': replacement});
     await delete(def, row['id'] as String);
+  }
+
+  /// Domains: re-reads 20i's current yearly cost for every TLD already in Master Data. Returns how many changed.
+  Future<int> refreshDomainCosts(List<Map<String, dynamic>> rows) async {
+    final fresh = {for (final t in await domainCartRepo.tldsFrom20i()) t.tld: t.cost};
+    var changed = 0;
+    for (final r in rows) {
+      final cost = fresh['${r['tld']}'];
+      if (cost == null || cost == (r['cost_per_year'] as num?)?.toDouble()) continue;
+      await sb.from('domain_tld_prices').update({'cost_per_year': cost}).eq('id', r['id'] as String);
+      changed++;
+    }
+    return changed;
   }
 
   /// Plain values for dropdowns and chips, e.g. every tag name.

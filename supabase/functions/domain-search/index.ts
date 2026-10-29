@@ -52,13 +52,16 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: "unauthorized" }, 401);
     if (!Deno.env.get("TWENTYI_API_KEY")) return json({ error: "domain search not configured" }, 500);
 
-    const { term } = await req.json();
+    const { term, tlds } = await req.json();
     const q = String(term ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
     if (!/^[a-z0-9][a-z0-9.-]{0,62}$/.test(q)) return json({ error: "Enter a valid domain name" }, 400);
+    // With a tlds list, check exactly those names ("name.com,name.net") in the same single call.
+    const wanted = Array.isArray(tlds) ? tlds.map((t) => String(t).toLowerCase().replace(/^\./, "")).filter((t) => /^[a-z0-9.-]{2,30}$/.test(t)) : [];
+    const names = wanted.length ? wanted.map((t) => `${q.split(".")[0]}.${t}`).join(",") : q;
 
     // One call only: a bare name ("mybusiness") is searched by 20i on every TLD it supports, and the
     // endpoint is rate limited (exceeding it blocks the key for up to 24h), so never fan out per TLD.
-    const res = await fetch(`${API}/domain-search/${encodeURIComponent(q)}`, {
+    const res = await fetch(`${API}/domain-search/${names.split(",").map(encodeURIComponent).join(",")}`, {
       headers: { Authorization: `Bearer ${btoa(Deno.env.get("TWENTYI_API_KEY")!)}` },
     });
     const text = await res.text();

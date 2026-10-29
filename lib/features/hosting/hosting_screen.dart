@@ -7,7 +7,7 @@ import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/models.dart';
 
-/// Web Hosting with a native UI. Only plans that have a price in Master Data > Hosting prices are offered;
+/// Hosting Packages with a native UI. Only plans that have a price in Master Data > Hosting prices are offered;
 /// the customer picks a billing period, types the domain the package is for, and adds it to the basket.
 class HostingScreen extends StatefulWidget {
   const HostingScreen({super.key});
@@ -121,7 +121,7 @@ class _HostingScreenState extends State<HostingScreen> {
     final plans = _plans;
     if (plans == null) return const Center(child: CircularProgressIndicator());
     return ListView(padding: const EdgeInsets.all(16), children: [
-      Text('Web Hosting', style: T.headlineLg),
+      Text('Hosting Packages', style: T.headlineLg),
       const SizedBox(height: 4),
       Text('Choose a hosting plan for your website.', style: T.bodyMd.copyWith(color: C.onSurfaceVariant)),
       const SizedBox(height: 16),

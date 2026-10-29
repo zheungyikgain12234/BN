@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/sortable_table.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../core/format.dart';
 import '../../data/admin_repository.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/masters.dart';
@@ -141,11 +142,9 @@ class _SoftwareDialogState extends State<_SoftwareDialog> {
   List<Tenant> _companies = const [];
   List<String> _tagOptions = const [];
   List<String> _pricingModels = const [];
-  List<String> _currencies = const [];
   String? _categoryId;
   String? _tenantId;
   String? _pricingModel;
-  String? _currency;
   final Set<String> _tags = {};
   String? _iconUrl;
   final List<_ShotDraft> _shots = [];
@@ -163,7 +162,6 @@ class _SoftwareDialogState extends State<_SoftwareDialog> {
     _categoryId = _p?.categoryId;
     _iconUrl = _p?.imageUrl;
     _pricingModel = (_p?.pricingModel.isEmpty ?? true) ? null : _p!.pricingModel;
-    _currency = (_p?.currency.isEmpty ?? true) ? null : _p!.currency;
     _tags.addAll(_p?.tags ?? const []);
     _tenantId = _isNew ? (_superAdmin ? null : AppState.instance.tenant?.id) : _p!.tenantId;
     _init();
@@ -174,7 +172,6 @@ class _SoftwareDialogState extends State<_SoftwareDialog> {
       final categories = await catalogRepo.categories();
       final tags = await masterRepo.values('software_tags', 'name');
       final models = await masterRepo.values('pricing_models', 'name');
-      final currencies = await masterRepo.values('currencies', 'code');
       final companies = _superAdmin ? await adminRepo.companies() : const <Tenant>[];
       final shots = _isNew ? const <ProductScreenshot>[] : await catalogRepo.screenshots(_p!.id);
       if (!mounted) return;
@@ -184,7 +181,6 @@ class _SoftwareDialogState extends State<_SoftwareDialog> {
         // keep values an older app already has even if they are no longer in the master
         _tagOptions = {...tags, ..._tags}.toList();
         _pricingModels = {...models, ?_pricingModel}.toList();
-        _currencies = {...currencies, ?_currency}.toList();
         if (!categories.any((c) => c.id == _categoryId)) _categoryId = null;
         _shots.addAll([for (final s in shots) _ShotDraft(id: s.id, url: s.url, title: s.title)]);
         _loading = false;
@@ -250,7 +246,7 @@ class _SoftwareDialogState extends State<_SoftwareDialog> {
         'sku': _nullIfEmpty(_sku),
         'pricing_model': _pricingModel,
         'price': double.tryParse(_price.text.trim()),
-        'currency': _currency,
+        'currency': kCurrency,
         'tags': _tags.toList(),
         'image_url': _iconUrl,
       };
@@ -355,15 +351,7 @@ class _SoftwareDialogState extends State<_SoftwareDialog> {
                       (v) => setState(() => _pricingModel = v),
                       width: half,
                     ),
-                    _text('Price', _price, '22.00', type: const TextInputType.numberWithOptions(decimal: true), width: half),
-                    _dropdown(
-                      'Currency',
-                      'Select a currency',
-                      _currency,
-                      [for (final c in _currencies) DropdownMenuItem<String?>(value: c, child: Text(c))],
-                      (v) => setState(() => _currency = v),
-                      width: half,
-                    ),
+                    _text('Price (SGD)', _price, '22.00', type: const TextInputType.numberWithOptions(decimal: true), width: half),
                   ]),
                   const SizedBox(height: 14),
                   _text('Short description', _description, 'One or two sentences shown on the app card', required: true, lines: 2),

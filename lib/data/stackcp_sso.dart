@@ -39,10 +39,10 @@ Future<String> stackcpUrl(String panelUrl) async {
 }
 
 /// Adds domains to the panel's own basket (cp.biznesthub.net) and gives the browser that same panel session, so the
-/// embedded basket shows them. Returns null on success, otherwise why it failed. Best effort: our own basket is
-/// the source of truth, this only mirrors it.
-Future<String?> addDomainsToPanelBasket(List<({String name, int years, String tld, String currency, double price})> items) async {
-  if (Env.offline || sb.auth.currentSession == null) return 'not signed in';
+/// embedded basket shows them. `error` is null on success, otherwise why it failed; `ids` maps each domain to its item id
+/// in the panel basket (needed to remove it later). Best effort: our own basket is the source of truth, this mirrors it.
+Future<({String? error, Map<String, String> ids})> addDomainsToPanelBasket(List<({String name, int years, String tld, String currency, double price})> items) async {
+  if (Env.offline || sb.auth.currentSession == null) return (error: 'not signed in', ids: <String, String>{});
   try {
     final res = await sb.functions.invoke('stackcp-sso', body: {
       'basket': [
@@ -51,11 +51,28 @@ Future<String?> addDomainsToPanelBasket(List<({String name, int years, String tl
       ],
     });
     final data = res.data as Map?;
-    if (data?['sso'] != true) return '${data?['reason'] ?? 'panel login failed'}';
+    if (data?['sso'] != true) return (error: '${data?['reason'] ?? 'panel login failed'}', ids: <String, String>{});
     for (final c in (data!['cookies'] as List)) {
       web.document.cookie = '${c['name']}=${c['value']}; $_flags';
     }
-    final failed = [for (final r in (data['basket'] as List? ?? const [])) if (r['ok'] != true) '${r['name']}: ${r['detail']}'];
+    final rows = (data['basket'] as List? ?? const []);
+    final failed = [for (final r in rows) if (r['ok'] != true) '${r['name']}: ${r['detail']}'];
+    final ids = {for (final r in rows) if (r['ok'] == true && r['id'] != null) '${r['name']}': '${r['id']}'};
+    return (error: failed.isEmpty ? null : failed.join('; '), ids: ids);
+  } catch (e) {
+    return (error: '$e', ids: <String, String>{});
+  }
+}
+
+/// Takes items out of the panel basket so it matches ours again. Returns null on success, otherwise why it failed.
+Future<String?> removeFromPanelBasket(List<String> ids) async {
+  if (ids.isEmpty) return null;
+  if (Env.offline || sb.auth.currentSession == null) return 'not signed in';
+  try {
+    final res = await sb.functions.invoke('stackcp-sso', body: {'removeBasket': ids});
+    final data = res.data as Map?;
+    if (data?['sso'] != true) return '${data?['reason'] ?? 'panel login failed'}';
+    final failed = [for (final r in (data!['removed'] as List? ?? const [])) if (r['ok'] != true) '${r['detail']}'];
     return failed.isEmpty ? null : failed.join('; ');
   } catch (e) {
     return '$e';

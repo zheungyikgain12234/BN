@@ -49,32 +49,32 @@ Deno.serve(async (req) => {
     if (allowed !== true) return json({ error: "Only a reseller admin can purchase domains" }, 403);
 
     // The cart is read with the caller's own token, so row-level security limits it to their rows.
-    const { data: basket, error: cartErr } = await supabase.from("domain_cart_items").select("domain, years");
+    const { data: basket, error: cartErr } = await supabase.from("domain_cart_items").select("domain, years, panel_item_id");
     if (cartErr) throw cartErr;
     if (!basket?.length) return json({ error: "Your domain basket is empty" }, 400);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // The price saved in the basket is never trusted (it can be stale or edited by the browser).
-    // Every line is re-priced from Master Data (domain_tld_prices) right now.
-    const { data: prices, error: priceErr } = await admin.from("domain_tld_prices").select("tld, years, price, currency");
+    // Every line is re-priced from Master Data (domain_prices view: SGD per year x years) right now.
+    const { data: prices, error: priceErr } = await admin.from("domain_prices").select("tld, price_per_year");
     if (priceErr) throw priceErr;
-    const cart: { domain: string; years: number; price: number; currency: string }[] = [];
+    const cart: { domain: string; years: number; price: number; panel_item_id: string | null }[] = [];
     for (const b of basket) {
       const tld = String(b.domain).toLowerCase().split(".").slice(1).join("."); // mysite.co.uk -> co.uk
-      const p = prices?.find((x) => x.tld === tld && x.years === b.years);
-      if (!p) return json({ error: `No price is set for ${b.domain} (${b.years} year(s)). Remove it from the basket.` }, 400);
-      cart.push({ domain: b.domain, years: b.years, price: Number(p.price), currency: p.currency });
+      const p = prices?.find((x) => x.tld === tld);
+      if (!p) return json({ error: `No price is set for .${tld}. Remove ${b.domain} from the basket.` }, 400);
+      if (!Number.isInteger(b.years) || b.years < 1 || b.years > 10) return json({ error: `${b.domain}: choose 1 to 10 years` }, 400);
+      cart.push({ domain: b.domain, years: b.years, price: Math.round(Number(p.price_per_year) * b.years * 100) / 100, panel_item_id: b.panel_item_id ?? null });
     }
-    const currency = cart[0].currency;
-    if (cart.some((i) => i.currency !== currency)) return json({ error: "Basket mixes currencies; pay for them separately" }, 400);
+    const currency = "SGD";
     const total = cart.reduce((s, i) => s + i.price, 0);
 
     const { data: order, error: orderErr } = await admin.from("domain_orders")
       .insert({ user_id: user.id, tenant_id: tenantId, currency, total }).select("id").single();
     if (orderErr) throw orderErr;
     const { error: itemsErr } = await admin.from("domain_order_items")
-      .insert(cart.map((i) => ({ order_id: order.id, domain: i.domain, years: i.years, price: i.price })));
+      .insert(cart.map((i) => ({ order_id: order.id, domain: i.domain, years: i.years, price: i.price, panel_item_id: i.panel_item_id })));
     if (itemsErr) throw itemsErr;
 
     const sep = returnUrl.includes("?") ? "&" : "?";

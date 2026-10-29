@@ -1,3 +1,5 @@
+import '../core/format.dart';
+
 class Tenant {
   Tenant({
     required this.id,
@@ -90,8 +92,8 @@ class Product {
   final List<String> tags;
   final DateTime? createdAt;
 
-  /// "USD 22.00" (or just the number when no currency is set); empty when the app has no price.
-  String get priceLabel => price == null ? '' : [if (currency.isNotEmpty) currency, _money(price!)].join(' ');
+  /// "SGD 22.00"; empty when the app has no price.
+  String get priceLabel => price == null ? '' : '$kCurrency ${_money(price!)}';
 
   /// "per user / monthly" style unit line under the price.
   String get priceUnit => pricingModel;
@@ -116,7 +118,7 @@ class Product {
       sku: (j['sku'] ?? '') as String,
       pricingModel: (j['pricing_model'] ?? '') as String,
       price: (j['price'] as num?)?.toDouble(),
-      currency: (j['currency'] ?? '') as String,
+      currency: kCurrency,
       imageUrl: j['image_url'] as String?,
       tags: ((j['tags'] ?? const []) as List).cast<String>(),
       createdAt: j['created_at'] == null ? null : DateTime.tryParse(j['created_at'] as String),
@@ -187,18 +189,25 @@ class CartItem {
       );
 }
 
-/// What the reseller charges to register one extension for [years] (price is for the whole duration).
+/// What the reseller charges per year for one extension (always SGD). [costPerYear] is what 20i charges, if known.
 class DomainPrice {
-  const DomainPrice({required this.tld, required this.years, required this.price, required this.currency});
-  final String tld, currency;
-  final int years;
-  final double price;
+  const DomainPrice({required this.tld, required this.pricePerYear, this.costPerYear});
+  final String tld;
+  final double pricePerYear;
+  final double? costPerYear;
 
-  String get label => '$years ${years == 1 ? 'year' : 'years'} for $currency ${price.toStringAsFixed(2)}';
+  /// The reseller can buy any number of years; the price is simply years x the yearly price.
+  double total(int years) => pricePerYear * years;
 
-  factory DomainPrice.fromJson(Map<String, dynamic> j) =>
-      DomainPrice(tld: j['tld'] as String, years: j['years'] as int, price: (j['price'] as num).toDouble(), currency: (j['currency'] ?? 'USD') as String);
+  factory DomainPrice.fromJson(Map<String, dynamic> j) => DomainPrice(
+        tld: j['tld'] as String,
+        pricePerYear: (j['price_per_year'] as num).toDouble(),
+        costPerYear: (j['cost_per_year'] as num?)?.toDouble(),
+      );
 }
+
+/// Longest registration the domain search offers (20i allows up to 10 years).
+const maxDomainYears = 10;
 
 class DomainCartItem {
   const DomainCartItem({required this.id, required this.domain, required this.years, required this.price, required this.currency});
@@ -211,7 +220,7 @@ class DomainCartItem {
         domain: j['domain'] as String,
         years: j['years'] as int,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -226,7 +235,7 @@ class DomainOrder {
   factory DomainOrder.fromJson(Map<String, dynamic> j) => DomainOrder(
         id: j['id'] as String,
         status: j['status'] as String,
-        currency: j['currency'] as String,
+        currency: kCurrency,
         total: (j['total'] as num).toDouble(),
         createdAt: DateTime.parse(j['created_at'] as String).toLocal(),
         items: [for (final i in (j['domain_order_items'] as List? ?? const [])) DomainOrderItem.fromJson(i as Map<String, dynamic>)],
@@ -257,7 +266,7 @@ class HostingPrice {
         planName: j['plan_name'] as String,
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -274,7 +283,7 @@ class HostingCartItem {
         months: j['months'] as int,
         domain: j['domain'] as String,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -288,7 +297,7 @@ class HostingOrder {
   factory HostingOrder.fromJson(Map<String, dynamic> j) => HostingOrder(
         id: j['id'] as String,
         status: j['status'] as String,
-        currency: j['currency'] as String,
+        currency: kCurrency,
         total: (j['total'] as num).toDouble(),
         items: [for (final i in (j['hosting_order_items'] as List? ?? const [])) HostingOrderItem.fromJson(i as Map<String, dynamic>)],
       );
@@ -323,7 +332,7 @@ class VpsPrice {
         planName: j['plan_name'] as String,
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -357,7 +366,7 @@ class VpsAddonPrice {
         spec: j['product_spec'] as String,
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -391,7 +400,7 @@ class VpsCartItem {
         location: j['location'] as String,
         serverName: j['server_name'] as String,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
         addonSpecs: [for (final a in (j['addons'] as List? ?? const [])) (spec: '${a['spec']}', months: (a['months'] as num).toInt())],
       );
 }
@@ -406,7 +415,7 @@ class VpsOrder {
   factory VpsOrder.fromJson(Map<String, dynamic> j) => VpsOrder(
         id: j['id'] as String,
         status: j['status'] as String,
-        currency: j['currency'] as String,
+        currency: kCurrency,
         total: (j['total'] as num).toDouble(),
         items: [for (final i in (j['vps_order_items'] as List? ?? const [])) VpsOrderItem.fromJson(i as Map<String, dynamic>)],
       );
@@ -444,7 +453,7 @@ class SslPrice {
         planName: j['plan_name'] as String,
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -461,7 +470,7 @@ class SslCartItem {
         months: j['months'] as int,
         hostname: j['hostname'] as String,
         price: (j['price'] as num).toDouble(),
-        currency: (j['currency'] ?? 'USD') as String,
+        currency: kCurrency,
       );
 }
 
@@ -475,7 +484,7 @@ class SslOrder {
   factory SslOrder.fromJson(Map<String, dynamic> j) => SslOrder(
         id: j['id'] as String,
         status: j['status'] as String,
-        currency: j['currency'] as String,
+        currency: kCurrency,
         total: (j['total'] as num).toDouble(),
         items: [for (final i in (j['ssl_order_items'] as List? ?? const [])) SslOrderItem.fromJson(i as Map<String, dynamic>)],
       );

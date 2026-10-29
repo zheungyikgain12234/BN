@@ -130,28 +130,36 @@ async function panelLogin(username: string, password: string): Promise<Map<strin
 
 type BasketItem = { name: string; productCode: string; periodMonths: number; currency: string; price: number };
 
-// Adds items to the panel's own basket (the same JSON-RPC call the panel's "Add to Basket" button makes).
-// Not a documented 20i API: the panel page must expose its CSRF pair, and the call may change if the panel does.
-async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): Promise<{ name: string; ok: boolean; detail: string }[]> {
+// Reads the panel's CSRF pair from one of its pages (every basket call must send it back as headers).
+async function panelCsrf(jar: Map<string, string>): Promise<{ name: string; value: string } | null> {
   const page = await fetch(`${PANEL}/domain-search`, { headers: { Cookie: cookieHeader(jar) } });
   absorb(jar, page);
   const html = await page.text();
   const pick = (res: RegExp[]) => { for (const r of res) { const m = html.match(r); if (m) return m[1]; } return undefined; };
   // The panel writes <meta name="Csrf-Name" content="...">, so matching must ignore case.
-  const csrfName = pick([/name="csrf[_-]name"\s+value="([^"]+)"/i, /name="csrf[_-]name"\s+content="([^"]+)"/i, /csrf[_-]name["']?\s*[:=,]\s*["']([^"']+)["']/i]);
-  const csrfValue = pick([/name="csrf[_-]value"\s+value="([^"]+)"/i, /name="csrf[_-]value"\s+content="([^"]+)"/i, /csrf[_-]value["']?\s*[:=,]\s*["']([^"']+)["']/i]);
-  if (!csrfName || !csrfValue) {
+  const name = pick([/name="csrf[_-]name"\s+value="([^"]+)"/i, /name="csrf[_-]name"\s+content="([^"]+)"/i, /csrf[_-]name["']?\s*[:=,]\s*["']([^"']+)["']/i]);
+  const value = pick([/name="csrf[_-]value"\s+value="([^"]+)"/i, /name="csrf[_-]value"\s+content="([^"]+)"/i, /csrf[_-]value["']?\s*[:=,]\s*["']([^"']+)["']/i]);
+  if (!name || !value) {
     const at = html.search(/csrf/i);
     console.error("stackcp-sso basket: csrf pair not found on", page.status, "page; context:", at < 0 ? "no 'csrf' text at all" : html.slice(Math.max(0, at - 150), at + 300));
-    return items.map((i) => ({ name: i.name, ok: false, detail: "could not read the panel's CSRF token" }));
+    return null;
   }
-  const out: { name: string; ok: boolean; detail: string }[] = [];
+  return { name, value };
+}
+
+// Adds items to the panel's own basket (the same JSON-RPC call the panel's "Add to Basket" button makes).
+// Not a documented 20i API: the panel page must expose its CSRF pair, and the call may change if the panel does.
+// `id` is the item's id inside the panel basket (a 40-character hex string found in the reply), needed to remove it later.
+async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): Promise<{ name: string; ok: boolean; detail: string; id?: string }[]> {
+  const csrf = await panelCsrf(jar);
+  if (!csrf) return items.map((i) => ({ name: i.name, ok: false, detail: "could not read the panel's CSRF token" }));
+  const out: { name: string; ok: boolean; detail: string; id?: string }[] = [];
   for (const i of items) {
     const res = await fetch(`${PANEL}/n/basket/own`, {
       method: "POST",
       headers: {
         Cookie: cookieHeader(jar), "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest",
-        "csrf-name": csrfName, "csrf-value": csrfValue, Origin: PANEL, Referer: `${PANEL}/domain-search`,
+        "csrf-name": csrf.name, "csrf-value": csrf.value, Origin: PANEL, Referer: `${PANEL}/domain-search`,
       },
       body: JSON.stringify({
         jsonrpc: "2.0", method: "addWithInfo", id: null,
@@ -165,10 +173,33 @@ async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): 
     });
     absorb(jar, res);
     const text = await res.text();
-    console.log("stackcp-sso basket add", i.name, res.status, text.slice(0, 300));
+    console.log("stackcp-sso basket add", i.name, res.status, text.slice(0, 600));
     let rpcError: string | undefined;
     try { rpcError = JSON.parse(text)?.error?.message; } catch { /* not JSON */ }
-    out.push({ name: i.name, ok: res.ok && !rpcError, detail: rpcError ?? (res.ok ? "added" : `panel replied ${res.status}`) });
+    const id = text.match(/\b[0-9a-f]{40}\b/i)?.[0];
+    out.push({ name: i.name, ok: res.ok && !rpcError, detail: rpcError ?? (res.ok ? "added" : `panel replied ${res.status}`), id });
+  }
+  return out;
+}
+
+// Removes items from the panel basket (the DELETE call the panel's own "remove" button makes).
+async function removeFromPanelBasket(jar: Map<string, string>, ids: string[]): Promise<{ id: string; ok: boolean; detail: string }[]> {
+  const csrf = await panelCsrf(jar);
+  if (!csrf) return ids.map((id) => ({ id, ok: false, detail: "could not read the panel's CSRF token" }));
+  const out: { id: string; ok: boolean; detail: string }[] = [];
+  for (const id of ids) {
+    if (!/^[0-9a-f]{40}$/i.test(id)) { out.push({ id, ok: false, detail: "not a basket item id" }); continue; }
+    const res = await fetch(`${PANEL}/n/basket/own/${id}`, {
+      method: "DELETE",
+      headers: {
+        Cookie: cookieHeader(jar), "X-Requested-With": "XMLHttpRequest",
+        "csrf-name": csrf.name, "csrf-value": csrf.value, Origin: PANEL, Referer: `${PANEL}/checkout`,
+      },
+    });
+    absorb(jar, res);
+    const text = await res.text();
+    console.log("stackcp-sso basket remove", id, res.status, text.slice(0, 200));
+    out.push({ id, ok: res.ok, detail: res.ok ? "removed" : `panel replied ${res.status}` });
   }
   return out;
 }
@@ -217,6 +248,17 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop price, only a hint
     }));
 
+  // Domains: domain:.com ... The entry with no action and a 12-month period is the yearly registration price, i.e. what 20i
+  // charges the reseller (the "transfer" entries are ignored).
+  const domains = (Array.isArray(products) ? products : [])
+    .filter((p: any) => typeof p?.code === "string" && /^domain:\.[a-z0-9.-]+$/i.test(p.code) && !p.discontinued)
+    .map((p: any) => {
+      const reg = (p.pricing ?? []).find((x: any) => x?.action == null && Number(x?.periodMonths) === 12);
+      return reg && Number.isFinite(Number(reg.price)) ? { tld: String(p.code).replace(/^domain:\./i, "").toLowerCase(), cost: Number(reg.price) } : null;
+    })
+    .filter((d: unknown) => d !== null)
+    .sort((a: any, b: any) => a.tld.localeCompare(b.tld));
+
   // The OS list is per product; the first plan's list is the same set the order page offers.
   let os: { code: string; label: string; paid: boolean }[] = [];
   if (plans.length) {
@@ -226,8 +268,8 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       .map((o: any) => ({ code: String(o.code), label: String(o.label ?? o.code), paid }));
     os = [...pick(reply?.free, false), ...pick(reply?.paid, true)];
   }
-  console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems,", sslPlans.length, "ssl certificates,", vpsAddons.length, "vps add-ons");
-  return { vpsPlans: plans, vpsOs: os, sslPlans, vpsAddons };
+  console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems,", sslPlans.length, "ssl certificates,", vpsAddons.length, "vps add-ons,", domains.length, "domains");
+  return { vpsPlans: plans, vpsOs: os, sslPlans, vpsAddons, domains };
 }
 
 Deno.serve(async (req) => {
@@ -240,10 +282,14 @@ Deno.serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
     });
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) return json({ error: "unauthorized" }, 401);
-
+    let { data: { user } } = await supabase.auth.getUser();
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    // The stripe-webhook has no user token: it calls with the service-role key and names the user whose basket to clean.
+    const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearers+/i, "");
+    if (!user && body?.userId && bearer === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      user = (await admin.auth.admin.getUserById(String(body.userId))).data.user;
+    }
+    if (!user?.email) return json({ error: "unauthorized" }, 401);
     const password = await panelPassword(user.id);
 
     // 2. Their StackCP user (create on first use).
@@ -251,10 +297,11 @@ Deno.serve(async (req) => {
     let ref = row?.stack_user_id as string | undefined;
     let username = row?.panel_username as string | undefined;
     if (!ref || !username) {
-      if (await findStackUserRef(user.email)) {
+      const existing = await findStackUserRef(user.email);
+      if (existing) {
         // A StackCP user with this email exists but isn't ours (no mapping row): we don't know
         // whose it is, so never touch its password.
-        return fallback("a StackCP user with this email already exists");
+        return fallback(`a StackCP user with this email already exists (${existing})`);
       }
       const name = (user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email.split("@")[0]) as string;
       ref = await createStackUser(user.email, name);
@@ -275,12 +322,14 @@ Deno.serve(async (req) => {
     if (!jar) return fallback("panel login failed");
     // Optional: push items into the panel basket in this same session, then hand the session to the browser.
     const basket = Array.isArray(body?.basket) && body.basket.length ? await addToPanelBasket(jar, body.basket as BasketItem[]) : undefined;
+    // Optional: take items out of the panel basket (the app's remove / clear, and the webhook after a payment).
+    const removed = Array.isArray(body?.removeBasket) && body.removeBasket.length ? await removeFromPanelBasket(jar, body.removeBasket.map(String)) : undefined;
     // Optional: read the shop catalogue (VPS plans and operating systems) in this same session.
     let catalogue;
     if (body?.catalogue) {
       try { catalogue = await fetchVpsCatalogue(jar); } catch (e) { return json({ sso: true, cookies: [], catalogueError: String(e) }); }
     }
-    return json({ sso: true, cookies: [...jar].map(([name, value]) => ({ name, value })), basket, catalogue });
+    return json({ sso: true, cookies: [...jar].map(([name, value]) => ({ name, value })), basket, removed, catalogue, panelUser });
   } catch (e) {
     return fallback(String(e));
   }

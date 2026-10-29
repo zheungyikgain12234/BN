@@ -209,10 +209,15 @@ class _DomainCartState extends State<_DomainCart> {
     }
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  /// Runs a basket change. Removing also removes the item from the 20i panel basket (slow), so it shows the spinner;
+  /// the action returns a warning text when the panel part failed.
+  Future<void> _run(Future<String?> Function() action) async {
     try {
-      await action();
+      final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
+      if (warn != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -296,7 +301,7 @@ class _DomainCartState extends State<_DomainCart> {
   }
 }
 
-/// Hosting packages added from Web Hosting; paid with Stripe like the domain basket.
+/// Hosting packages added from Hosting Packages; paid with Stripe like the domain basket.
 class _HostingCart extends StatefulWidget {
   const _HostingCart();
 
@@ -679,7 +684,7 @@ class CartScreen extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('My cart', style: T.headlineLg),
           const SizedBox(height: 8),
-          const TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [Tab(text: 'Software'), Tab(text: 'Domains'), Tab(text: 'Web hosting'), Tab(text: 'VPS'), Tab(text: 'SSL')]),
+          const TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [Tab(text: 'Software'), Tab(text: 'Domains'), Tab(text: 'Hosting Packages'), Tab(text: 'VPS'), Tab(text: 'SSL')]),
           const SizedBox(height: 12),
           Expanded(
             child: TabBarView(children: [

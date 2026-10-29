@@ -223,3 +223,38 @@ class ErrorRetry extends StatelessWidget {
         ),
       );
 }
+
+/// Runs [task] with a centred spinner box over the whole screen, so nobody clicks again while it is working.
+/// Use it around anything slow, such as a call to 20i.
+Future<R> withLoader<R>(BuildContext context, Future<R> Function() task, {String message = 'Contacting 20i...'}) async {
+  final nav = Navigator.of(context, rootNavigator: true);
+  showDialog<void>(
+    context: context,
+    useRootNavigator: true,
+    barrierDismissible: false,
+    barrierColor: Colors.black38,
+    builder: (_) => PopScope(
+      canPop: false,
+      child: Center(
+        child: Material(
+          borderRadius: BorderRadius.circular(12),
+          color: C.surfaceLowest,
+          elevation: 6,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3)),
+              const SizedBox(height: 16),
+              Text(message, style: T.bodyMd),
+            ]),
+          ),
+        ),
+      ),
+    ),
+  );
+  try {
+    return await task();
+  } finally {
+    if (nav.mounted) nav.pop();
+  }
+}
