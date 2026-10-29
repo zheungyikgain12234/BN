@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/models.dart';
+import '../../data/stackcp_sso.dart';
 
 /// Hosting Packages with a native UI. Only plans that have a price in Master Data > Hosting prices are offered;
 /// the customer picks a billing period, types the domain the package is for, and adds it to the basket.
@@ -63,8 +64,22 @@ class _HostingScreenState extends State<HostingScreen> {
       return;
     }
     try {
-      await hostingCartRepo.add(domain, p);
-      if (mounted) setState(() => _added.add(planId));
+      final result = await withLoader(context, () async {
+        // Adding the same domain again replaces it, so drop the old copy from the 20i panel basket first (no duplicates there).
+        final old = await hostingCartRepo.idOf(domain);
+        if (old != null) await hostingCartRepo.remove(old);
+        await hostingCartRepo.add(domain, p);
+        // Mirror into the hosting panel's basket (best effort; our own basket is the one that is paid).
+        final res = await addHostingToPanelBasket(domain: domain, typeId: p.packageTypeId, months: p.months, price: p.cost);
+        final panelId = res.ids[domain];
+        if (panelId != null) await hostingCartRepo.setPanelId(domain, panelId);
+        return res;
+      }, message: 'Adding to your basket...');
+      if (!mounted) return;
+      setState(() => _added.add(planId));
+      if (result.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to your basket, but not to the hosting panel basket: ${result.error}'), behavior: SnackBarBehavior.floating));
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }

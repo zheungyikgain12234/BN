@@ -68,32 +68,30 @@ async function registerWith20i(admin: ReturnType<typeof createClient>, userId: s
 
 type HostingItem = { id: string; domain: string; package_type_id: string; plan_name: string; months: number };
 
-// 20i: POST /reseller/{id}/addWeb creates the hosting package for the domain. The documented body has no
-// billing period, so months is only stored on our side for now; check the first live result against 20i.
+// 20i: POST /reseller/{id}/addStackUserPackageAllowance adds the hosting package allowance the shop sells (type =
+// "<packageBundleTypeId>-<allowance>-<location>", e.g. "307997-1-sin") to the buyer's StackCP user, and domainProvision creates the
+// website for the domain straight away. The documented body has no billing period, so months is only stored on our side for now.
+// UNVERIFIED against a live reply: check the first live result against 20i (and the 20i account balance it charges).
 async function createHostingWith20i(admin: ReturnType<typeof createClient>, userId: string, item: HostingItem): Promise<string> {
   const key = Deno.env.get("TWENTYI_API_KEY");
   if (!key) throw new Error("TWENTYI_API_KEY is not set");
   const reseller = Deno.env.get("TWENTYI_RESELLER_ID") ?? "*";
 
   const { data: su } = await admin.from("stackcp_users").select("stack_user_id").eq("user_id", userId).maybeSingle();
-  const body: Record<string, unknown> = { type: item.package_type_id, domain_name: item.domain, label: item.plan_name };
-  if (su?.stack_user_id) body.stackUser = su.stack_user_id;
+  if (!su?.stack_user_id) throw new Error("the buyer has no StackCP user yet (open the hosting panel once, then retry)");
+  const body = { type: item.package_type_id, stackUser: su.stack_user_id, domainProvision: item.domain };
 
-  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addWeb`, {
+  const res = await fetch(`https://api.20i.com/reseller/${reseller}/addStackUserPackageAllowance`, {
     method: "POST",
     headers: { Authorization: `Bearer ${btoa(key)}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   const text = await res.text();
-  console.log("20i addWeb", item.domain, res.status, text.slice(0, 500));
+  console.log("20i addStackUserPackageAllowance", item.domain, res.status, text.slice(0, 500));
   if (!res.ok) throw new Error(`20i ${res.status}: ${text.slice(0, 250)}`);
-  // Success looks like {"result":3965135}: the new package id. Anything else is not a confirmed creation.
-  let packageId: unknown;
-  try { packageId = JSON.parse(text)?.result; } catch { /* handled below */ }
-  if (typeof packageId !== "number" && !(typeof packageId === "string" && packageId !== "")) {
-    throw new Error(`20i did not return a package id: ${text.slice(0, 200)}`);
-  }
-  return String(packageId);
+  if (text.trim() === "false") throw new Error("20i refused the order");
+  // The reply shape isn't documented; keep it as the note so the first live result can be checked.
+  return text.trim().slice(0, 120) || "ok";
 }
 
 // Same shape as the domain branch below, on the hosting_* tables.
@@ -117,7 +115,7 @@ async function handleHosting(admin: ReturnType<typeof createClient>, orderId: st
       try {
         const packageId = await createHostingWith20i(admin, claimed.user_id, item);
         status = "registered";
-        note = `20i package ${packageId}`;
+        note = `20i: ${packageId}`;
       } catch (e) {
         console.error("hosting creation failed", item.domain, e);
         status = "failed";

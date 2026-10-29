@@ -292,6 +292,21 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       .map((o: any) => ({ code: String(o.code), label: String(o.label ?? o.code), paid }));
     os = [...pick(reply?.free, false), ...pick(reply?.paid, true)];
   }
+  // Hosting packages: the panel sells them as StackCP package allowances, product code
+  // stack_user_package_allowance:<packageBundleTypeId>-<allowance>-<location> (e.g. ...:307997-1-sin). The part after the colon is
+  // exactly the `type` that 20i's addStackUserPackageAllowance takes. catalogueCodes lists the product kinds seen, for error messages.
+  const everything = Array.isArray(products) ? products : [];
+  const catalogueCodes: Record<string, number> = {};
+  for (const p of everything) if (typeof p?.code === "string") { const k = p.code.split(":")[0]; catalogueCodes[k] = (catalogueCodes[k] ?? 0) + 1; }
+  const hostingPlans = everything
+    .filter((p: any) => typeof p?.code === "string" && /^stack_user_package_allowance:/i.test(p.code) && !p.discontinued)
+    .flatMap((p: any) => periods(p, 1).map((x) => ({
+      code: String(p.code),
+      typeId: String(p.code).replace(/^stack_user_package_allowance:/i, ""),   // 307997-1-sin
+      label: String(p.label ?? p.code),
+      months: x.months,
+      price: x.price,                                                          // 20i's cost for the whole period
+    })));
   // Data centres: 20i has no list endpoint; the panel's own order page carries them in its script (dcLocations: [{ text: "UK",
   // id: "dc_location-lhr" }, ...]), so read them from there. Not a documented API: if the script changes this comes back empty.
   const vpsLocations: { code: string; label: string }[] = [];
@@ -303,7 +318,7 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
     console.error("stackcp-sso: could not read the VPS locations", String(e));
   }
   console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems,", sslPlans.length, "ssl certificates,", vpsAddons.length, "vps add-ons,", domains.length, "domains");
-  return { vpsPlans: plans, vpsOs: os, vpsLocations, sslPlans, vpsAddons, domains };
+  return { vpsPlans: plans, vpsOs: os, vpsLocations, sslPlans, vpsAddons, domains, hostingPlans, catalogueCodes };
 }
 
 Deno.serve(async (req) => {

@@ -333,10 +333,15 @@ class _HostingCartState extends State<_HostingCart> {
     }
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  /// Removing also removes the package from the 20i panel basket (slow), so it shows the spinner; the action returns a warning
+  /// text when the panel part failed.
+  Future<void> _run(Future<String?> Function() action) async {
     try {
-      await action();
+      final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
+      if (warn != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }

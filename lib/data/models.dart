@@ -254,10 +254,13 @@ class DomainOrderItem {
 
 /// What the reseller charges for one hosting plan over one billing period (Master Data > Hosting prices).
 class HostingPrice {
-  const HostingPrice({required this.packageTypeId, required this.planName, required this.months, required this.price, required this.currency});
+  const HostingPrice({required this.packageTypeId, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0});
   final String packageTypeId, planName, currency;
   final int months;
   final double price;
+
+  /// What 20i charges for the whole period (the selling [price] is this plus the profit %).
+  final double cost;
 
   String get label => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
 
@@ -267,6 +270,7 @@ class HostingPrice {
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
         currency: kCurrency,
+        cost: (j['cost'] as num?)?.toDouble() ?? 0,
       );
 }
 

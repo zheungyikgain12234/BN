@@ -71,6 +71,26 @@ Future<({String? error, Map<String, String> ids})> addVpsToPanelBasket({
       },
     ]);
 
+/// Adds one hosting package to the panel basket, the way the panel's own order page does: the shop product is a package allowance
+/// (`stack_user_package_allowance:TYPE`) named after the domain it is for. `ids` maps the domain to its item id in the panel basket.
+Future<({String? error, Map<String, String> ids})> addHostingToPanelBasket({
+  required String domain,
+  required String typeId, // e.g. 307997-1-sin
+  required int months,
+  required double price, // 20i's cost for the period
+}) =>
+    _addToPanelBasket([
+      {
+        'name': domain,
+        'productCode': 'stack_user_package_allowance:$typeId',
+        'periodMonths': months,
+        'currency': 'SGD',
+        'price': price,
+        'basketPricing': 0,
+        'config': {'name': domain},
+      },
+    ]);
+
 Future<({String? error, Map<String, String> ids})> _addToPanelBasket(List<Map<String, Object?>> basket) async {
   if (Env.offline || sb.auth.currentSession == null) return (error: 'not signed in', ids: <String, String>{});
   try {

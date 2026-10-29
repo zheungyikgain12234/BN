@@ -236,8 +236,9 @@ class DomainCartRepository {
 
 /// Hosting packages in the basket (one row per user + domain). Prices are re-read from Master Data, like domains.
 class HostingCartRepository {
+  /// Selling prices (20i cost + profit %), from the hosting_prices view.
   Future<List<HostingPrice>> prices() async {
-    final rows = await sb.from('hosting_plan_prices').select().order('plan_name').order('months');
+    final rows = await sb.from('hosting_prices').select().order('plan_name').order('months');
     return rows.map<HostingPrice>(HostingPrice.fromJson).toList();
   }
 
@@ -269,14 +270,34 @@ class HostingCartRepository {
     await CartState.instance.refresh();
   }
 
-  Future<void> remove(String id) async {
-    await sb.from('hosting_cart_items').delete().eq('id', id);
-    await CartState.instance.refresh();
+  /// The panel-basket ids of the given cart rows (null = every row of this user). Best effort: a missing id is skipped.
+  Future<List<String>> _panelIds({String? id}) async {
+    final q = sb.from('hosting_cart_items').select('panel_item_id');
+    final rows = await (id == null ? q.eq('user_id', sb.auth.currentUser!.id) : q.eq('id', id));
+    return [for (final r in rows) if (r['panel_item_id'] != null) '${r['panel_item_id']}'];
   }
 
-  Future<void> clear() async {
+  /// The cart row id of a domain already in the basket (null if it isn't there).
+  Future<String?> idOf(String domain) async =>
+      (await sb.from('hosting_cart_items').select('id').eq('domain', domain).eq('user_id', sb.auth.currentUser!.id).maybeSingle())?['id'] as String?;
+
+  /// Saves the 20i panel basket id of a package that was just mirrored there.
+  Future<void> setPanelId(String domain, String panelId) =>
+      sb.from('hosting_cart_items').update({'panel_item_id': panelId}).eq('domain', domain).eq('user_id', sb.auth.currentUser!.id);
+
+  /// Removes from our basket and, so the two stay the same, from the 20i panel basket. Returns a warning if the panel part failed.
+  Future<String?> remove(String id) async {
+    final why = await removeFromPanelBasket(await _panelIds(id: id));
+    await sb.from('hosting_cart_items').delete().eq('id', id);
+    await CartState.instance.refresh();
+    return why;
+  }
+
+  Future<String?> clear() async {
+    final why = await removeFromPanelBasket(await _panelIds());
     await sb.from('hosting_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
     await CartState.instance.refresh();
+    return why;
   }
 
   /// Saves the basket as an order and returns the Stripe payment page to send the browser to.
@@ -293,6 +314,22 @@ class HostingCartRepository {
   Future<List<HostingOrder>> orders() async {
     final rows = await sb.from('hosting_orders').select('*, hosting_order_items(plan_name, domain, months, status, note)').order('created_at', ascending: false).limit(10);
     return rows.map<HostingOrder>(HostingOrder.fromJson).toList();
+  }
+
+  /// The panel shop's hosting packages with 20i's cost per period, read through the stackcp-sso login (for the Master Data picker).
+  /// [typeId] is the part of the shop code after the colon (e.g. 307997-1-sin), the `type` 20i's addStackUserPackageAllowance takes.
+  Future<List<({String code, String typeId, String label, int months, double price})>> panelHosting() async {
+    final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
+    final data = res.data as Map?;
+    if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
+    if (data?['sso'] != true) throw '${data?['reason'] ?? 'Panel login failed'}';
+    final c = (data!['catalogue'] as Map?) ?? const {};
+    final list = [
+      for (final p in (c['hostingPlans'] as List? ?? const []))
+        (code: '${p['code']}', typeId: '${p['typeId']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 12, price: (p['price'] as num?)?.toDouble() ?? 0),
+    ];
+    if (list.isEmpty) throw 'No hosting packages (stack_user_package_allowance) were found in the 20i shop. Product kinds seen: ${((c['catalogueCodes'] as Map?) ?? const {}).keys.join(', ')}';
+    return list;
   }
 
   /// Plans the reseller can sell, straight from 20i (for the Master Data picker).

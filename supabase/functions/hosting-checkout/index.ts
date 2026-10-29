@@ -7,7 +7,7 @@
 // Session. The order only becomes "paid" in stripe-webhook (which tells hosting from domains by
 // metadata[kind]), never from the browser.
 //
-// The price saved in the basket is never trusted: every line is re-priced from hosting_plan_prices here.
+// The price saved in the basket is never trusted: every line is re-priced from the hosting_prices view (Master Data cost + profit %) here.
 //
 // TEST MODE: STRIPE_SECRET_KEY must start with sk_test_ unless STRIPE_ALLOW_LIVE=true.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     if (cartErr) throw cartErr;
     if (!basket?.length) return json({ error: "Your hosting basket is empty" }, 400);
 
-    const { data: prices, error: priceErr } = await admin.from("hosting_plan_prices").select("package_type_id, plan_name, months, price, currency");
+    const { data: prices, error: priceErr } = await admin.from("hosting_prices").select("package_type_id, plan_name, months, price, currency");
     if (priceErr) throw priceErr;
     const cart: { domain: string; package_type_id: string; plan_name: string; months: number; price: number; currency: string }[] = [];
     for (const b of basket) {

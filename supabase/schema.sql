@@ -1,7 +1,7 @@
 -- BizNest Hub schema: the ONLY schema file. Run it in the Supabase SQL editor, then run seed.sql.
 -- It starts by deleting the app's tables, so running it again resets everything (users in auth.users are kept).
--- Current scope: login/companies, software store, resellers + clients, domain names and VPS.
--- Hosting and SSL are not in here yet; their tables are dropped and will be added back later.
+-- Current scope: login/companies, software store, resellers + clients, domain names, VPS and Hosting Packages.
+-- SSL is not in here yet; its tables are dropped and will be added back later.
 --
 -- Roles
 --   super admin     : row in public.app_admins    -> manages companies, users, software, master data; never buys
@@ -17,9 +17,9 @@ drop table if exists
   public.product_comments, public.product_screenshots, public.products,
   public.software_tags, public.pricing_models, public.software_categories, public.currencies,
   public.app_admins, public.tenant_members, public.tenants, public.profiles,
-  -- hosting / SSL are not in scope yet (old tables); the VPS tables are rebuilt in section 5b
+  -- SSL is not in scope yet (old tables); the VPS and hosting tables are rebuilt in sections 5b and 5c
   public.purchased_hosting, public.hosting_order_items, public.hosting_orders, public.hosting_cart_items, public.hosting_plan_prices,
-  public.purchased_vps, public.vps_order_items, public.vps_orders, public.vps_cart_items, public.vps_addon_prices, public.vps_os_options, public.vps_plan_prices,
+  public.purchased_vps, public.vps_order_items, public.vps_orders, public.vps_cart_items, public.vps_addon_prices, public.vps_os_options, public.vps_locations, public.vps_plan_prices,
   public.purchased_ssl, public.ssl_order_items, public.ssl_orders, public.ssl_cart_items, public.ssl_plan_prices
   cascade;
 drop function if exists public.handle_new_user() cascade;
@@ -615,6 +615,126 @@ create policy "own vps order items" on public.vps_order_items for select to auth
   using (exists (select 1 from public.vps_orders o where o.id = order_id and o.user_id = auth.uid()));
 -- purchased_vps rows are created by stripe-webhook (service role) and changed by assign_vps() only
 create policy "purchased vps readable" on public.purchased_vps for select to authenticated using (public.can_manage_tenant(tenant_id));
+
+-- 5c. Hosting Packages ------------------------------------------------------------------------------------------
+-- Same idea as domains and VPS: Master Data > Hosting Package prices (admin only). The plan, its billing period and 20i's
+-- cost for the WHOLE period are picked from the 20i shop, never typed. Selling price = cost x (1 + profit %), rounded to
+-- the cent. Always SGD. Nothing is seeded.
+create table public.hosting_plan_prices (
+  id uuid primary key default gen_random_uuid(),
+  plan_name text not null,                    -- from 20i, shown to customers
+  package_type_id text not null,              -- 20i package type id (what addWeb needs)
+  months int not null check (months > 0),
+  cost numeric(12,2) not null check (cost >= 0),    -- what 20i charges for the whole period (copied from the 20i shop)
+  profit_percent numeric(6,2) not null check (profit_percent >= 0),
+  unique (package_type_id, months)
+);
+
+-- What the app and hosting-checkout read: the table plus the computed selling price.
+create view public.hosting_prices with (security_invoker = true) as
+select p.id, p.plan_name, p.package_type_id, p.months, p.cost, p.profit_percent,
+       round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency
+from public.hosting_plan_prices p;
+grant select on public.hosting_prices to authenticated, service_role;
+
+create table public.hosting_cart_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  package_type_id text not null,
+  plan_name text not null,
+  months int not null check (months > 0),
+  domain text not null,                       -- the domain the hosting package is created for
+  price numeric(12,2) not null,               -- display only: hosting-checkout re-prices from hosting_prices
+  currency text not null default 'SGD',
+  panel_item_id text,                         -- this package's id in the 20i panel basket (so it can be removed from there too)
+  created_at timestamptz not null default now(),
+  unique (user_id, domain)
+);
+
+create table public.hosting_orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users on delete cascade,
+  tenant_id uuid references public.tenants on delete set null,   -- which company bought it
+  status text not null default 'pending' check (status in ('pending', 'paid', 'failed')),
+  currency text not null,
+  total numeric(12,2) not null,
+  stripe_session_id text unique,
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+create index hosting_orders_user_idx on public.hosting_orders (user_id, created_at desc);
+
+create table public.hosting_order_items (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.hosting_orders on delete cascade,
+  package_type_id text not null,
+  plan_name text not null,
+  months int not null check (months > 0),
+  domain text not null,
+  price numeric(12,2) not null,
+  -- pending: waiting for payment | test_registered: paid, creation only simulated
+  -- registered: package really created at 20i | failed: paid but creation failed (see note)
+  status text not null default 'pending' check (status in ('pending', 'test_registered', 'registered', 'failed')),
+  note text
+);
+create index hosting_order_items_order_idx on public.hosting_order_items (order_id);
+
+create table public.purchased_hosting (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants on delete cascade,
+  order_item_id uuid unique references public.hosting_order_items on delete set null,
+  plan_name text not null,
+  package_type_id text not null,
+  months int not null check (months > 0),
+  domain text not null,
+  unit_price numeric(12,2) not null,           -- price the reseller paid (Master Data price at checkout)
+  currency text not null,
+  status text not null check (status in ('test_registered', 'registered', 'failed')),
+  note text,
+  purchased_at timestamptz not null default now(),
+  client_id uuid references public.clients on delete set null,
+  sell_price numeric(12,2),                    -- what the client pays (reseller markup included)
+  assigned_at timestamptz
+);
+create index purchased_hosting_tenant_idx on public.purchased_hosting (tenant_id);
+create index purchased_hosting_client_idx on public.purchased_hosting (client_id);
+
+-- Assign (or unassign with p_client null) one purchased hosting package to a client at the reseller's own price.
+create or replace function public.assign_hosting(p_hosting uuid, p_client uuid, p_sell_price numeric) returns void
+language plpgsql security definer set search_path = '' as $$
+declare v_tenant uuid; v_status text;
+begin
+  select tenant_id, status into v_tenant, v_status from public.purchased_hosting where id = p_hosting;
+  if v_tenant is null or not public.can_manage_tenant(v_tenant) then raise exception 'not allowed'; end if;
+  if p_client is not null and v_status = 'failed' then raise exception 'This package was not created, so it cannot be assigned'; end if;
+  if p_client is not null and not exists (select 1 from public.clients where id = p_client and tenant_id = v_tenant) then
+    raise exception 'Client does not belong to this company';
+  end if;
+  update public.purchased_hosting
+     set client_id = p_client,
+         sell_price = case when p_client is null then null else p_sell_price end,
+         assigned_at = case when p_client is null then null else now() end
+   where id = p_hosting;
+end $$;
+grant execute on function public.assign_hosting(uuid, uuid, numeric) to authenticated;
+
+alter table public.hosting_plan_prices enable row level security;
+alter table public.hosting_cart_items enable row level security;
+alter table public.hosting_orders enable row level security;
+alter table public.hosting_order_items enable row level security;
+alter table public.purchased_hosting enable row level security;
+
+create policy "hosting prices readable" on public.hosting_plan_prices for select to authenticated using (true);
+create policy "hosting prices managed" on public.hosting_plan_prices for all to authenticated
+  using (public.is_app_admin()) with check (public.is_app_admin());
+create policy "own hosting cart" on public.hosting_cart_items for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid() and not public.is_app_admin()); -- super admins never buy
+-- customers only read their own orders; the checkout / webhook Edge Functions write with the service role
+create policy "own hosting orders" on public.hosting_orders for select to authenticated using (user_id = auth.uid());
+create policy "own hosting order items" on public.hosting_order_items for select to authenticated
+  using (exists (select 1 from public.hosting_orders o where o.id = order_id and o.user_id = auth.uid()));
+-- purchased_hosting rows are created by stripe-webhook (service role) and changed by assign_hosting() only
+create policy "purchased hosting readable" on public.purchased_hosting for select to authenticated using (public.can_manage_tenant(tenant_id));
 
 -- 6. Row level security -----------------------------------------------------------------------------------------
 alter table public.profiles enable row level security;

@@ -234,6 +234,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// VPS plans / add-ons: choose from 20i's own list (the plan, its billing period and 20i's cost come with it).
   Future<void> _pickPanel() => switch (widget.def.table) {
         'vps_plan_prices' => _pickVps(),
+        'hosting_plan_prices' => _pickHosting(),
         'vps_locations' => _pickLocation(),
         _ => _pickVpsAddon(),
       };
@@ -274,7 +275,6 @@ class _MasterDialogState extends State<_MasterDialog> {
 
   /// Which field gets a "Pick from 20i" button, for the master tables whose values 20i can supply.
   String? get _pickerField => switch (widget.def.table) {
-        'hosting_plan_prices' => 'package_type_id',
         'ssl_plan_prices' => 'class_code',
         'vps_os_options' => 'code',
         _ => null,
@@ -368,24 +368,31 @@ class _MasterDialogState extends State<_MasterDialog> {
     }
   }
 
-  /// Hosting prices: choose the plan from 20i's own list instead of typing its id.
-  Future<void> _pick20iPlan() async {
+  /// Hosting prices: choose the plan and billing period from the 20i shop (the plan id and 20i's cost come with it).
+  Future<void> _pickHosting() async {
     try {
-      final plans = await withLoader(context, hostingCartRepo.plansFrom20i);
+      final plans = await withLoader(context, hostingCartRepo.panelHosting, message: 'Loading hosting plans from 20i...');
       if (!mounted) return;
-      final chosen = await showDialog<({String id, String name})>(
+      final chosen = await showDialog<({String code, String typeId, String label, int months, double price})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: const Text('Plans from 20i'),
+          title: const Text('Hosting plans from 20i (cost per period)'),
           children: [
-            if (plans.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('20i returned no plans.')),
-            for (final p in plans) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, p), child: Text('${p.name}  (${p.id})')),
+            for (final p in plans)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, p),
+                child: Text('${p.label}  ·  ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  cost ${money(p.price)}  (${p.typeId})'),
+              ),
           ],
         ),
       );
       if (chosen == null) return;
-      _text['package_type_id']!.text = chosen.id;
-      if (_text['plan_name']!.text.trim().isEmpty) _text['plan_name']!.text = chosen.name;
+      setState(() {
+        _text['package_type_id']!.text = chosen.typeId;
+        _text['plan_name']!.text = chosen.label;
+        _text['months']!.text = '${chosen.months}';
+        _cost = chosen.price;
+      });
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -455,7 +462,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         builder: (state) {
                           final tld = _text[f.key]!.text;
                           final panel = f.kind == MasterFieldKind.panel;
-                          final shown = !panel ? '.$tld' : def.table == 'vps_plan_prices' ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : '${_text['label']!.text}  ·  ${_text['months']!.text} mo';
+                          final shown = !panel ? '.$tld' : (def.table == 'vps_plan_prices' || def.table == 'hosting_plan_prices') ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : '${_text['label']!.text}  ·  ${_text['months']!.text} mo';
                           // An existing price keeps its extension; a new one is picked from 20i's list.
                           final locked = widget.row != null;
                           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -499,7 +506,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         ),
                         if (f.key == _pickerField)
                           TextButton.icon(
-                            onPressed: switch (def.table) { 'hosting_plan_prices' => _pick20iPlan, 'ssl_plan_prices' => _pickSsl, _ => _pickVps },
+                            onPressed: switch (def.table) { 'ssl_plan_prices' => _pickSsl, _ => _pickVps },
                             icon: const Icon(Icons.cloud_download_outlined, size: 18),
                             label: const Text('Pick from 20i'),
                           ),

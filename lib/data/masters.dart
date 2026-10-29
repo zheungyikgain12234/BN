@@ -79,16 +79,19 @@ const masterDefs = <MasterDef>[
   ),
   MasterDef(
     table: 'hosting_plan_prices',
+    readFrom: 'hosting_prices',
     title: 'Hosting Package prices',
     singular: 'hosting package price',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
     fields: [
-      MasterField('plan_name', 'Plan name', required: true, hint: 'Starter hosting'),
-      MasterField('package_type_id', '20i plan id / shop code', required: true, hint: 'Pick from 20i, or paste a shop code'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '12'),
-      MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '60.00'),
+      MasterField('plan_name', 'Plan', readOnly: true),
+      MasterField('package_type_id', 'Plan from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan and period'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
+      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
+      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
@@ -193,7 +196,7 @@ class MasterRepository {
   }
 
   /// Master tables whose cost column is copied from 20i (domain TLDs, VPS plans, VPS add-ons).
-  static bool hasCost(MasterDef def) => const {'domain_tld_prices', 'vps_plan_prices', 'vps_addon_prices'}.contains(def.table);
+  static bool hasCost(MasterDef def) => const {'domain_tld_prices', 'hosting_plan_prices', 'vps_plan_prices', 'vps_addon_prices'}.contains(def.table);
 
   /// Re-reads 20i's current cost for every row already in Master Data, so selling prices follow 20i's price changes.
   /// Returns how many changed.
@@ -204,10 +207,13 @@ class MasterRepository {
     String keyOf(Map<String, dynamic> r) => switch (def.table) {
           'domain_tld_prices' => '${r['tld']}',
           'vps_plan_prices' => '${r['vps_type']}|${r['months']}',
+          'hosting_plan_prices' => '${r['package_type_id']}|${r['months']}',
           _ => '${r['product_spec']}|${r['months']}',
         };
     if (domains) {
       fresh = {for (final t in await domainCartRepo.tldsFrom20i()) t.tld: t.cost};
+    } else if (def.table == 'hosting_plan_prices') {
+      fresh = {for (final p in await hostingCartRepo.panelHosting()) '${p.typeId}|${p.months}': p.price};
     } else if (def.table == 'vps_plan_prices') {
       fresh = {for (final p in (await vpsCartRepo.panelCatalogue()).plans) '${p.code.replaceFirst('vps:', 'vps-')}|${p.months}': p.price};
     } else {
