@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/models.dart';
+import '../../data/stackcp_sso.dart';
 
 /// SSL certificates with a native UI. Only certificates that have a price in Master Data > SSL prices are offered.
 /// The reseller picks a certificate and period, names the site, chooses how to prove control of the domain, fills in the
@@ -127,8 +128,25 @@ class _SslScreenState extends State<SslScreen> {
       'zip': t(_zip),
     };
     try {
-      await sslCartRepo.add(hostname: hostname, plan: plan, verification: _verify, contact: contact);
-      if (mounted) setState(() => _added = true);
+      final result = await withLoader(context, () async {
+        // Adding the same certificate again replaces it, so drop the old copy from the 20i panel basket first (no duplicates there).
+        final old = await sslCartRepo.idOf(hostname, plan.classCode);
+        if (old != null) await sslCartRepo.remove(old);
+        await sslCartRepo.add(hostname: hostname, plan: plan, verification: _verify, contact: contact);
+        // Mirror into the hosting panel's basket (best effort; our own basket is the one that is paid).
+        final res = await addSslToPanelBasket(
+          hostname: hostname, domain: domain, planName: plan.planName, classCode: plan.classCode, months: plan.months,
+          price: plan.cost, verification: _verify, contact: contact,
+        );
+        final panelId = res.ids['${plan.planName} ($hostname)'];
+        if (panelId != null) await sslCartRepo.setPanelId(hostname, plan.classCode, panelId);
+        return res;
+      }, message: 'Adding to your basket...');
+      if (!mounted) return;
+      setState(() => _added = true);
+      if (result.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to your basket, but not to the hosting panel basket: ${result.error}'), behavior: SnackBarBehavior.floating));
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }

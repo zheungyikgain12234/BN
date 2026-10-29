@@ -235,6 +235,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   Future<void> _pickPanel() => switch (widget.def.table) {
         'vps_plan_prices' => _pickVps(),
         'hosting_plan_prices' => _pickHosting(),
+        'ssl_plan_prices' => _pickSsl(),
         'vps_locations' => _pickLocation(),
         _ => _pickVpsAddon(),
       };
@@ -275,7 +276,6 @@ class _MasterDialogState extends State<_MasterDialog> {
 
   /// Which field gets a "Pick from 20i" button, for the master tables whose values 20i can supply.
   String? get _pickerField => switch (widget.def.table) {
-        'ssl_plan_prices' => 'class_code',
         'vps_os_options' => 'code',
         _ => null,
       };
@@ -307,25 +307,28 @@ class _MasterDialogState extends State<_MasterDialog> {
     }
   }
 
-  /// SSL prices: choose a certificate from the panel shop's list (read through the panel login).
+  /// SSL prices: choose a certificate and billing period from the panel shop's list (the class code and 20i's cost come with it).
   Future<void> _pickSsl() async {
     try {
-      final plans = await withLoader(context, sslCartRepo.panelCatalogue);
+      final plans = await withLoader(context, sslCartRepo.panelCatalogue, message: 'Loading certificates from 20i...');
       if (!mounted) return;
       final chosen = await showDialog<({String code, String label, int months, double price})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: const Text('SSL certificates from 20i'),
+          title: const Text('SSL certificates from 20i (cost per period)'),
           children: [
             if (plans.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
-            for (final p in plans) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, p), child: Text('${p.label}  (${p.code}, shop price ${p.price.toStringAsFixed(2)} / ${p.months} mo)')),
+            for (final p in plans) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, p), child: Text('${p.label}  ·  ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  cost ${money(p.price)}  (${p.code})')),
           ],
         ),
       );
       if (chosen == null) return;
-      _text['class_code']!.text = chosen.code;
-      if (_text['plan_name']!.text.trim().isEmpty) _text['plan_name']!.text = chosen.label;
-      if (_text['months']!.text.trim().isEmpty) _text['months']!.text = '${chosen.months}';
+      setState(() {
+        _text['class_code']!.text = chosen.code;
+        _text['plan_name']!.text = chosen.label;
+        _text['months']!.text = '${chosen.months}';
+        _cost = chosen.price;
+      });
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -462,7 +465,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         builder: (state) {
                           final tld = _text[f.key]!.text;
                           final panel = f.kind == MasterFieldKind.panel;
-                          final shown = !panel ? '.$tld' : (def.table == 'vps_plan_prices' || def.table == 'hosting_plan_prices') ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : '${_text['label']!.text}  ·  ${_text['months']!.text} mo';
+                          final shown = !panel ? '.$tld' : (def.table == 'vps_plan_prices' || def.table == 'hosting_plan_prices' || def.table == 'ssl_plan_prices') ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : '${_text['label']!.text}  ·  ${_text['months']!.text} mo';
                           // An existing price keeps its extension; a new one is picked from 20i's list.
                           final locked = widget.row != null;
                           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -506,7 +509,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         ),
                         if (f.key == _pickerField)
                           TextButton.icon(
-                            onPressed: switch (def.table) { 'ssl_plan_prices' => _pickSsl, _ => _pickVps },
+                            onPressed: _pickVps,
                             icon: const Icon(Icons.cloud_download_outlined, size: 18),
                             label: const Text('Pick from 20i'),
                           ),

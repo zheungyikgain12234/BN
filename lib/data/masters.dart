@@ -113,16 +113,19 @@ const masterDefs = <MasterDef>[
   ),
   MasterDef(
     table: 'ssl_plan_prices',
+    readFrom: 'ssl_prices',
     title: 'SSL prices',
     singular: 'SSL price',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
     fields: [
-      MasterField('plan_name', 'Certificate name', required: true, hint: 'Simple SSL'),
-      MasterField('class_code', '20i class code', required: true, hint: 'tucows-rapidssl, tucows-rapidssl_wildcard or tucows-truebizid_ev'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '12'),
-      MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '63.96'),
+      MasterField('plan_name', 'Certificate', readOnly: true),
+      MasterField('class_code', 'Certificate from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a certificate and period'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
+      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
+      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
@@ -196,7 +199,7 @@ class MasterRepository {
   }
 
   /// Master tables whose cost column is copied from 20i (domain TLDs, VPS plans, VPS add-ons).
-  static bool hasCost(MasterDef def) => const {'domain_tld_prices', 'hosting_plan_prices', 'vps_plan_prices', 'vps_addon_prices'}.contains(def.table);
+  static bool hasCost(MasterDef def) => const {'domain_tld_prices', 'hosting_plan_prices', 'ssl_plan_prices', 'vps_plan_prices', 'vps_addon_prices'}.contains(def.table);
 
   /// Re-reads 20i's current cost for every row already in Master Data, so selling prices follow 20i's price changes.
   /// Returns how many changed.
@@ -208,12 +211,15 @@ class MasterRepository {
           'domain_tld_prices' => '${r['tld']}',
           'vps_plan_prices' => '${r['vps_type']}|${r['months']}',
           'hosting_plan_prices' => '${r['package_type_id']}|${r['months']}',
+          'ssl_plan_prices' => '${r['class_code']}|${r['months']}',
           _ => '${r['product_spec']}|${r['months']}',
         };
     if (domains) {
       fresh = {for (final t in await domainCartRepo.tldsFrom20i()) t.tld: t.cost};
     } else if (def.table == 'hosting_plan_prices') {
       fresh = {for (final p in await hostingCartRepo.panelHosting()) '${p.typeId}|${p.months}': p.price};
+    } else if (def.table == 'ssl_plan_prices') {
+      fresh = {for (final p in await sslCartRepo.panelCatalogue()) '${p.code}|${p.months}': p.price};
     } else if (def.table == 'vps_plan_prices') {
       fresh = {for (final p in (await vpsCartRepo.panelCatalogue()).plans) '${p.code.replaceFirst('vps:', 'vps-')}|${p.months}': p.price};
     } else {

@@ -6,7 +6,7 @@
 // Stripe Checkout Session. The order only becomes "paid" in stripe-webhook (which tells SSL from the rest by
 // metadata[kind]), never from the browser.
 //
-// The price saved in the basket is never trusted: every line is re-priced from ssl_plan_prices here.
+// The price saved in the basket is never trusted: every line is re-priced from the ssl_prices view (Master Data cost + profit %) here.
 // Only a reseller admin of the company may buy for it.
 //
 // TEST MODE: STRIPE_SECRET_KEY must start with sk_test_ unless STRIPE_ALLOW_LIVE=true.
@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     if (cartErr) throw cartErr;
     if (!basket?.length) return json({ error: "Your SSL basket is empty" }, 400);
 
-    const { data: prices, error: priceErr } = await admin.from("ssl_plan_prices").select("class_code, plan_name, months, price, currency");
+    const { data: prices, error: priceErr } = await admin.from("ssl_prices").select("class_code, plan_name, months, price, currency");
     if (priceErr) throw priceErr;
     const cart: { class_code: string; plan_name: string; months: number; hostname: string; verification: string; contact: unknown; price: number; currency: string }[] = [];
     for (const b of basket) {

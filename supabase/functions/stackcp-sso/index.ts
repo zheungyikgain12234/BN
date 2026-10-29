@@ -254,12 +254,12 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
   // SSL certificates live in the same catalogue as tls_certificate:<class-code> (e.g. tls_certificate:tucows-rapidssl).
   const sslPlans = (Array.isArray(products) ? products : [])
     .filter((p: any) => typeof p?.code === "string" && /^tls_certificate:[a-z0-9_-]+$/i.test(p.code) && !p.discontinued)
-    .map((p: any) => ({
+    .flatMap((p: any) => periods(p, 12).map((x) => ({
       code: String(p.code).replace(/^tls_certificate:/i, ""),      // tucows-rapidssl, the 20i class-code
       label: String(p.label ?? p.code),                            // Simple SSL
-      months: Number(p.pricing?.[0]?.periodMonths ?? 12),
-      price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop price, only a hint
-    }));
+      months: x.months,
+      price: x.price,                                              // 20i's cost for the whole period
+    })));
 
   // VPS add-ons: cPanel licences, snapshot backup and extra disks (vps_addon:cpanelpro, vps_addon:disk100GB ...).
   // spec is the 20i productSpec ("vps_addon-cpanelpro"), which is what addVpsAddon wants.

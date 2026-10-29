@@ -507,13 +507,14 @@ class VpsCartRepository {
 
 /// SSL certificates in the basket (one row per user + hostname + certificate type). Prices are re-read from Master Data.
 class SslCartRepository {
+  /// Selling prices (20i cost + profit %), from the ssl_prices view.
   Future<List<SslPrice>> prices() async {
-    final rows = await sb.from('ssl_plan_prices').select().order('plan_name').order('months');
+    final rows = await sb.from('ssl_prices').select().order('plan_name').order('months');
     return rows.map<SslPrice>(SslPrice.fromJson).toList();
   }
 
   /// The panel shop's SSL certificates (code = 20i class-code), read through the stackcp-sso login for the Master Data picker.
-  /// The price is the shop's own price: a hint only, the reseller price is set in Master Data.
+  /// The price is 20i's cost for the whole period; the selling price is that plus the profit % set in Master Data.
   Future<List<({String code, String label, int months, double price})>> panelCatalogue() async {
     final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
     final data = res.data as Map?;
@@ -557,14 +558,34 @@ class SslCartRepository {
     await CartState.instance.refresh();
   }
 
-  Future<void> remove(String id) async {
-    await sb.from('ssl_cart_items').delete().eq('id', id);
-    await CartState.instance.refresh();
+  /// The panel-basket ids of the given cart rows (null = every row of this user). Best effort: a missing id is skipped.
+  Future<List<String>> _panelIds({String? id}) async {
+    final q = sb.from('ssl_cart_items').select('panel_item_id');
+    final rows = await (id == null ? q.eq('user_id', sb.auth.currentUser!.id) : q.eq('id', id));
+    return [for (final r in rows) if (r['panel_item_id'] != null) '${r['panel_item_id']}'];
   }
 
-  Future<void> clear() async {
+  /// The cart row id of a certificate already in the basket (null if it isn't there).
+  Future<String?> idOf(String hostname, String classCode) async =>
+      (await sb.from('ssl_cart_items').select('id').eq('hostname', hostname).eq('class_code', classCode).eq('user_id', sb.auth.currentUser!.id).maybeSingle())?['id'] as String?;
+
+  /// Saves the 20i panel basket id of a certificate that was just mirrored there.
+  Future<void> setPanelId(String hostname, String classCode, String panelId) =>
+      sb.from('ssl_cart_items').update({'panel_item_id': panelId}).eq('hostname', hostname).eq('class_code', classCode).eq('user_id', sb.auth.currentUser!.id);
+
+  /// Removes from our basket and, so the two stay the same, from the 20i panel basket. Returns a warning if the panel part failed.
+  Future<String?> remove(String id) async {
+    final why = await removeFromPanelBasket(await _panelIds(id: id));
+    await sb.from('ssl_cart_items').delete().eq('id', id);
+    await CartState.instance.refresh();
+    return why;
+  }
+
+  Future<String?> clear() async {
+    final why = await removeFromPanelBasket(await _panelIds());
     await sb.from('ssl_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
     await CartState.instance.refresh();
+    return why;
   }
 
   /// Saves the basket as an order and returns the Stripe payment page to send the browser to.

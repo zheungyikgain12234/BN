@@ -450,10 +450,13 @@ class VpsOrderItem {
 
 /// What the reseller charges for one SSL certificate type over one period (Master Data > SSL prices).
 class SslPrice {
-  const SslPrice({required this.classCode, required this.planName, required this.months, required this.price, required this.currency});
+  const SslPrice({required this.classCode, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0});
   final String classCode, planName, currency;
   final int months;
   final double price;
+
+  /// What 20i charges for the whole period (the selling [price] is this plus the profit %).
+  final double cost;
 
   /// A wildcard certificate covers every subdomain, so its name is always "*.domain".
   bool get wildcard => classCode.endsWith('_wildcard');
@@ -466,6 +469,7 @@ class SslPrice {
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
         currency: kCurrency,
+        cost: (j['cost'] as num?)?.toDouble() ?? 0,
       );
 }
 

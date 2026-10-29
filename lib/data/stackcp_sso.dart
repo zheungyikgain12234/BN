@@ -91,6 +91,62 @@ Future<({String? error, Map<String, String> ids})> addHostingToPanelBasket({
       },
     ]);
 
+/// Adds one SSL certificate to the panel basket, the way the panel's own order-ssl page does: the shop product is
+/// `tls_certificate:CLASS_CODE`, with the verification method, the approval address and the certificate contact in its
+/// service configuration. `ids` maps the hostname to its item id in the panel basket. [contact] is the map the app stores
+/// with the basket row (type, organisation, name, country, telephone, address, city, state, zip).
+Future<({String? error, Map<String, String> ids})> addSslToPanelBasket({
+  required String hostname,
+  required String domain, // the registered domain the approval email address belongs to (admin@domain)
+  required String planName,
+  required String classCode,
+  required int months,
+  required double price, // 20i's cost for the period
+  required String verification, // email | dns | file
+  required Map<String, String> contact,
+}) {
+  final street = (contact['address'] ?? '').split('\n').where((l) => l.trim().isNotEmpty).toList();
+  final business = contact['type'] == 'business';
+  return _addToPanelBasket([
+    {
+      'name': '$planName ($hostname)',
+      'productCode': 'tls_certificate:$classCode',
+      'periodMonths': months,
+      'currency': 'SGD',
+      'price': price,
+      'basketPricing': 0,
+      'config': {
+        'authType': verification,
+        'approveEmail': verification == 'email' ? 'admin@$domain' : null,
+        'domain': hostname,
+        'contact': {
+          'businessType': {
+            'fields': {'company_name': false, 'trading_name': false, 'company_number': false},
+          },
+          'eppContact': {
+            'postalInfo': {
+              'name': contact['name'],
+              'org': business ? contact['organisation'] : null,
+              'addr': {
+                'street': [for (var i = 0; i < 3; i++) i < street.length ? street[i] : null],
+                'city': contact['city'],
+                'sp': contact['state'],
+                'pc': contact['zip'],
+                'cc': contact['country'],
+              },
+            },
+            'voice': contact['telephone'],
+            'email': sb.auth.currentUser?.email,
+            'extension': {'type': 'FIND'},
+          },
+          'valid': true,
+          'submitted': true,
+        },
+      },
+    },
+  ]);
+}
+
 Future<({String? error, Map<String, String> ids})> _addToPanelBasket(List<Map<String, Object?>> basket) async {
   if (Env.offline || sb.auth.currentSession == null) return (error: 'not signed in', ids: <String, String>{});
   try {
