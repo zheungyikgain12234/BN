@@ -304,10 +304,15 @@ class HostingCartRepository {
   }
 }
 
+/// Customer-facing names of the data centres, by 20i code (Master Data > VPS locations). Filled whenever the list is read.
+final Map<String, String> vpsLocationNames = {};
+String vpsLocationLabel(String code) => vpsLocationNames[code] ?? code;
+
 /// VPS servers in the basket (one row per user + server name). Prices are re-read from Master Data, like hosting.
 class VpsCartRepository {
+  /// Selling prices (20i cost + profit %), from the vps_prices view.
   Future<List<VpsPrice>> prices() async {
-    final rows = await sb.from('vps_plan_prices').select().order('plan_name').order('months');
+    final rows = await sb.from('vps_prices').select().order('plan_name').order('months');
     return rows.map<VpsPrice>(VpsPrice.fromJson).toList();
   }
 
@@ -332,7 +337,7 @@ class VpsCartRepository {
 
   /// cPanel, backup and disk add-ons the reseller sells (Master Data > VPS add-on prices).
   Future<List<VpsAddonPrice>> addonPrices() async {
-    final rows = await sb.from('vps_addon_prices').select().order('label').order('months');
+    final rows = await sb.from('vps_addons_priced').select().order('label').order('months');
     return rows.map<VpsAddonPrice>(VpsAddonPrice.fromJson).toList();
   }
 
@@ -349,6 +354,26 @@ class VpsCartRepository {
     ];
   }
 
+  /// The data centres 20i's panel offers (read from its order page by stackcp-sso), for the Master Data picker.
+  Future<List<({String code, String label})>> panelLocations() async {
+    final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
+    final data = res.data as Map?;
+    if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
+    if (data?['sso'] != true) throw '${data?['reason'] ?? 'Panel login failed'}';
+    final c = (data!['catalogue'] as Map?) ?? const {};
+    return [for (final l in (c['vpsLocations'] as List? ?? const [])) (code: '${l['code']}', label: '${l['label']}')];
+  }
+
+  /// Data centres the reseller offers (Master Data > VPS locations).
+  Future<List<({String code, String label})>> locations() async {
+    final rows = await sb.from('vps_locations').select().order('label');
+    final list = [for (final r in rows) (code: '${r['code']}', label: '${r['label']}')];
+    vpsLocationNames
+      ..clear()
+      ..addEntries(list.map((l) => MapEntry(l.code, l.label)));
+    return list;
+  }
+
   Future<List<VpsOs>> osOptions() async {
     final rows = await sb.from('vps_os_options').select().order('label');
     return rows.map<VpsOs>(VpsOs.fromJson).toList();
@@ -357,6 +382,7 @@ class VpsCartRepository {
   Future<List<VpsCartItem>> items() async {
     final rows = await sb.from('vps_cart_items').select().order('created_at');
     final items = rows.map<VpsCartItem>(VpsCartItem.fromJson).toList();
+    await locations().catchError((_) => <({String code, String label})>[]); // only for the names shown in the basket
     // Show today's Master Data price, the same one vps-checkout charges (the saved price may be stale).
     final prices = await this.prices();
     final addonPrices = await this.addonPrices().catchError((_) => <VpsAddonPrice>[]); // table not created yet
@@ -395,14 +421,34 @@ class VpsCartRepository {
     await CartState.instance.refresh();
   }
 
-  Future<void> remove(String id) async {
-    await sb.from('vps_cart_items').delete().eq('id', id);
-    await CartState.instance.refresh();
+  /// The panel-basket ids of the given cart rows (null = every row of this user). Best effort: a missing id is skipped.
+  Future<List<String>> _panelIds({String? id}) async {
+    final q = sb.from('vps_cart_items').select('panel_item_id');
+    final rows = await (id == null ? q.eq('user_id', sb.auth.currentUser!.id) : q.eq('id', id));
+    return [for (final r in rows) if (r['panel_item_id'] != null) '${r['panel_item_id']}'];
   }
 
-  Future<void> clear() async {
+  /// The cart row id of a server already in the basket (null if it isn't there).
+  Future<String?> idOf(String serverName) async =>
+      (await sb.from('vps_cart_items').select('id').eq('server_name', serverName).eq('user_id', sb.auth.currentUser!.id).maybeSingle())?['id'] as String?;
+
+  /// Saves the 20i panel basket id of a server that was just mirrored there.
+  Future<void> setPanelId(String serverName, String panelId) =>
+      sb.from('vps_cart_items').update({'panel_item_id': panelId}).eq('server_name', serverName).eq('user_id', sb.auth.currentUser!.id);
+
+  /// Removes from our basket and, so the two stay the same, from the 20i panel basket. Returns a warning if the panel part failed.
+  Future<String?> remove(String id) async {
+    final why = await removeFromPanelBasket(await _panelIds(id: id));
+    await sb.from('vps_cart_items').delete().eq('id', id);
+    await CartState.instance.refresh();
+    return why;
+  }
+
+  Future<String?> clear() async {
+    final why = await removeFromPanelBasket(await _panelIds());
     await sb.from('vps_cart_items').delete().eq('user_id', sb.auth.currentUser!.id);
     await CartState.instance.refresh();
+    return why;
   }
 
   /// Saves the basket as an order and returns the Stripe payment page to send the browser to.

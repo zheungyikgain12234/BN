@@ -1,7 +1,7 @@
 -- BizNest Hub schema: the ONLY schema file. Run it in the Supabase SQL editor, then run seed.sql.
 -- It starts by deleting the app's tables, so running it again resets everything (users in auth.users are kept).
--- Current scope: login/companies, software store, resellers + clients, and domain names.
--- Hosting, VPS and SSL are not in here yet; their tables are dropped and will be added back later.
+-- Current scope: login/companies, software store, resellers + clients, domain names and VPS.
+-- Hosting and SSL are not in here yet; their tables are dropped and will be added back later.
 --
 -- Roles
 --   super admin     : row in public.app_admins    -> manages companies, users, software, master data; never buys
@@ -17,7 +17,7 @@ drop table if exists
   public.product_comments, public.product_screenshots, public.products,
   public.software_tags, public.pricing_models, public.software_categories, public.currencies,
   public.app_admins, public.tenant_members, public.tenants, public.profiles,
-  -- not part of the current scope (old hosting / VPS / SSL tables)
+  -- hosting / SSL are not in scope yet (old tables); the VPS tables are rebuilt in section 5b
   public.purchased_hosting, public.hosting_order_items, public.hosting_orders, public.hosting_cart_items, public.hosting_plan_prices,
   public.purchased_vps, public.vps_order_items, public.vps_orders, public.vps_cart_items, public.vps_addon_prices, public.vps_os_options, public.vps_plan_prices,
   public.purchased_ssl, public.ssl_order_items, public.ssl_orders, public.ssl_cart_items, public.ssl_plan_prices
@@ -444,6 +444,177 @@ begin
    where id = p_domain;
 end $$;
 grant execute on function public.assign_domain(uuid, uuid, numeric) to authenticated;
+
+-- 5b. VPS -------------------------------------------------------------------------------------------------------
+-- Same idea as domains: Master Data > VPS prices (admin only). The plan, its billing period and 20i's cost for the WHOLE
+-- period are picked from the 20i shop, never typed. Selling price = cost x (1 + profit %), rounded to the cent. Always SGD.
+-- Nothing is seeded: add plans, add-ons, operating systems and locations in Master Data.
+create table public.vps_plan_prices (
+  id uuid primary key default gen_random_uuid(),
+  plan_name text not null,                    -- from 20i, e.g. 1 Core Unmanaged VPS
+  vps_type text not null,                     -- 20i VPS type, e.g. vps-a (shop product code vps:a)
+  months int not null check (months > 0),
+  cost numeric(12,2) not null check (cost >= 0),    -- what 20i charges for the whole period (copied from the 20i shop)
+  profit_percent numeric(6,2) not null check (profit_percent >= 0),
+  unique (vps_type, months)
+);
+
+-- cPanel licence, snapshot backup and extra disks; ordered from 20i right after the server is created (addVpsAddon).
+create table public.vps_addon_prices (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,                        -- from 20i, e.g. cPanel Pro (Max 30 Sites)
+  product_spec text not null,                 -- 20i productSpec: vps_addon-cpanelpro | vps_addon-backup | vps_addon-disk100GB ...
+  months int not null check (months > 0),     -- billing period; the add-on renews separately from the server
+  cost numeric(12,2) not null check (cost >= 0),
+  profit_percent numeric(6,2) not null check (profit_percent >= 0),
+  unique (product_spec, months)
+);
+
+-- What the app and vps-checkout read: the tables plus the computed selling price.
+create view public.vps_prices with (security_invoker = true) as
+select p.id, p.plan_name, p.vps_type, p.months, p.cost, p.profit_percent,
+       round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency
+from public.vps_plan_prices p;
+create view public.vps_addons_priced with (security_invoker = true) as
+select a.id, a.label, a.product_spec, a.months, a.cost, a.profit_percent,
+       round(a.cost * (1 + a.profit_percent / 100), 2) as price, 'SGD'::text as currency
+from public.vps_addon_prices a;
+grant select on public.vps_prices, public.vps_addons_priced to authenticated, service_role;
+
+create table public.vps_os_options (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,                        -- shown to customers, e.g. Ubuntu 22.04
+  code text not null unique                   -- 20i OS code, e.g. ubuntu22.04 (picked from 20i)
+);
+
+-- Data centres the reseller offers. 20i's addVPS takes the code (e.g. dc_location-lhr); the label is what customers see.
+create table public.vps_locations (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  label text not null
+);
+
+create table public.vps_cart_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  vps_type text not null,
+  plan_name text not null,
+  months int not null check (months > 0),
+  os_code text not null,
+  os_label text not null,
+  location text not null,                     -- a vps_locations.code
+  server_name text not null,
+  price numeric(12,2) not null,               -- display only: vps-checkout re-prices from vps_prices
+  currency text not null default 'SGD',
+  addons jsonb not null default '[]',         -- [{ spec, months }]
+  panel_item_id text,                         -- this server's id in the 20i panel basket (so it can be removed from there too)
+  created_at timestamptz not null default now(),
+  unique (user_id, server_name)
+);
+
+create table public.vps_orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users on delete cascade,
+  tenant_id uuid references public.tenants on delete set null,
+  status text not null default 'pending' check (status in ('pending', 'paid', 'failed')),
+  currency text not null,
+  total numeric(12,2) not null,
+  stripe_session_id text unique,
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
+);
+create index vps_orders_user_idx on public.vps_orders (user_id, created_at desc);
+
+create table public.vps_order_items (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.vps_orders on delete cascade,
+  vps_type text not null,
+  plan_name text not null,
+  months int not null check (months > 0),
+  os_code text not null,
+  os_label text not null,
+  location text not null,
+  server_name text not null,
+  price numeric(12,2) not null,
+  addons jsonb not null default '[]',         -- [{ spec, label, months, price }] as charged
+  -- test_registered: paid, creation only simulated | registered: server really ordered at 20i | failed: see note
+  status text not null default 'pending' check (status in ('pending', 'test_registered', 'registered', 'failed')),
+  note text
+);
+create index vps_order_items_order_idx on public.vps_order_items (order_id);
+
+create table public.purchased_vps (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants on delete cascade,
+  order_item_id uuid unique references public.vps_order_items on delete set null,
+  plan_name text not null,
+  vps_type text not null,
+  months int not null check (months > 0),
+  os_label text not null,
+  location text not null,
+  server_name text not null,
+  unit_price numeric(12,2) not null,           -- price the reseller paid (Master Data price at checkout)
+  currency text not null,
+  addons jsonb not null default '[]',
+  status text not null check (status in ('test_registered', 'registered', 'failed')),
+  note text,
+  purchased_at timestamptz not null default now(),
+  client_id uuid references public.clients on delete set null,
+  sell_price numeric(12,2),                    -- what the client pays (reseller markup included)
+  assigned_at timestamptz
+);
+create index purchased_vps_tenant_idx on public.purchased_vps (tenant_id);
+create index purchased_vps_client_idx on public.purchased_vps (client_id);
+
+-- Assign (or unassign with p_client null) one purchased VPS to a client at the reseller's own price.
+create or replace function public.assign_vps(p_vps uuid, p_client uuid, p_sell_price numeric) returns void
+language plpgsql security definer set search_path = '' as $$
+declare v_tenant uuid; v_status text;
+begin
+  select tenant_id, status into v_tenant, v_status from public.purchased_vps where id = p_vps;
+  if v_tenant is null or not public.can_manage_tenant(v_tenant) then raise exception 'not allowed'; end if;
+  if p_client is not null and v_status = 'failed' then raise exception 'This VPS was not created, so it cannot be assigned'; end if;
+  if p_client is not null and not exists (select 1 from public.clients where id = p_client and tenant_id = v_tenant) then
+    raise exception 'Client does not belong to this company';
+  end if;
+  update public.purchased_vps
+     set client_id = p_client,
+         sell_price = case when p_client is null then null else p_sell_price end,
+         assigned_at = case when p_client is null then null else now() end
+   where id = p_vps;
+end $$;
+grant execute on function public.assign_vps(uuid, uuid, numeric) to authenticated;
+
+alter table public.vps_plan_prices enable row level security;
+alter table public.vps_addon_prices enable row level security;
+alter table public.vps_os_options enable row level security;
+alter table public.vps_locations enable row level security;
+alter table public.vps_cart_items enable row level security;
+alter table public.vps_orders enable row level security;
+alter table public.vps_order_items enable row level security;
+alter table public.purchased_vps enable row level security;
+
+-- everyone reads the prices and lists; only a super admin changes them
+create policy "vps prices readable" on public.vps_plan_prices for select to authenticated using (true);
+create policy "vps prices managed" on public.vps_plan_prices for all to authenticated
+  using (public.is_app_admin()) with check (public.is_app_admin());
+create policy "vps addon prices readable" on public.vps_addon_prices for select to authenticated using (true);
+create policy "vps addon prices managed" on public.vps_addon_prices for all to authenticated
+  using (public.is_app_admin()) with check (public.is_app_admin());
+create policy "vps os readable" on public.vps_os_options for select to authenticated using (true);
+create policy "vps os managed" on public.vps_os_options for all to authenticated
+  using (public.is_app_admin()) with check (public.is_app_admin());
+create policy "vps locations readable" on public.vps_locations for select to authenticated using (true);
+create policy "vps locations managed" on public.vps_locations for all to authenticated
+  using (public.is_app_admin()) with check (public.is_app_admin());
+create policy "own vps cart" on public.vps_cart_items for all to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid() and not public.is_app_admin()); -- super admins never buy
+-- customers only read their own orders; the checkout / webhook Edge Functions write with the service role
+create policy "own vps orders" on public.vps_orders for select to authenticated using (user_id = auth.uid());
+create policy "own vps order items" on public.vps_order_items for select to authenticated
+  using (exists (select 1 from public.vps_orders o where o.id = order_id and o.user_id = auth.uid()));
+-- purchased_vps rows are created by stripe-webhook (service role) and changed by assign_vps() only
+create policy "purchased vps readable" on public.purchased_vps for select to authenticated using (public.can_manage_tenant(tenant_id));
 
 -- 6. Row level security -----------------------------------------------------------------------------------------
 alter table public.profiles enable row level security;

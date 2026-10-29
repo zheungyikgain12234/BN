@@ -320,10 +320,13 @@ class HostingOrderItem {
 
 /// What the reseller charges for one VPS plan over one billing period (Master Data > VPS prices).
 class VpsPrice {
-  const VpsPrice({required this.vpsType, required this.planName, required this.months, required this.price, required this.currency});
+  const VpsPrice({required this.vpsType, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0});
   final String vpsType, planName, currency;
   final int months;
   final double price;
+
+  /// What 20i charges for the whole period (the selling [price] is this plus the profit %).
+  final double cost;
 
   String get label => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
 
@@ -333,6 +336,7 @@ class VpsPrice {
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
         currency: kCurrency,
+        cost: (j['cost'] as num?)?.toDouble() ?? 0,
       );
 }
 
@@ -347,10 +351,13 @@ class VpsOs {
 /// What the reseller charges for one VPS add-on over one billing period (Master Data > VPS add-on prices).
 /// [spec] is the 20i productSpec, e.g. vps_addon-cpanelpro, vps_addon-backup or vps_addon-disk100GB.
 class VpsAddonPrice {
-  const VpsAddonPrice({required this.label, required this.spec, required this.months, required this.price, required this.currency});
+  const VpsAddonPrice({required this.label, required this.spec, required this.months, required this.price, required this.currency, this.cost = 0});
   final String label, spec, currency;
   final int months;
   final double price;
+
+  /// What 20i charges for the whole period.
+  final double cost;
 
   bool get isCpanel => spec.startsWith('vps_addon-cpanel');
   bool get isBackup => spec == 'vps_addon-backup';
@@ -367,6 +374,7 @@ class VpsAddonPrice {
         months: j['months'] as int,
         price: (j['price'] as num).toDouble(),
         currency: kCurrency,
+        cost: (j['cost'] as num?)?.toDouble() ?? 0,
       );
 }
 

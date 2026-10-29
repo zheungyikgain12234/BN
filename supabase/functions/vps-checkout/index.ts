@@ -6,7 +6,7 @@
 // Stripe Checkout Session. The order only becomes "paid" in stripe-webhook (which tells VPS from the rest by
 // metadata[kind]), never from the browser.
 //
-// The price saved in the basket is never trusted: every line is re-priced from vps_plan_prices here.
+// The price saved in the basket is never trusted: every line is re-priced from the vps_prices view (Master Data cost + profit %) here.
 // Only a reseller admin of the company may buy for it.
 //
 // TEST MODE: STRIPE_SECRET_KEY must start with sk_test_ unless STRIPE_ALLOW_LIVE=true.
@@ -50,10 +50,10 @@ Deno.serve(async (req) => {
     if (cartErr) throw cartErr;
     if (!basket?.length) return json({ error: "Your VPS basket is empty" }, 400);
 
-    const { data: prices, error: priceErr } = await admin.from("vps_plan_prices").select("vps_type, plan_name, months, price, currency");
+    const { data: prices, error: priceErr } = await admin.from("vps_prices").select("vps_type, plan_name, months, price, currency");
     if (priceErr) throw priceErr;
-    // Add-ons (cPanel, backup, disks) are re-priced from vps_addon_prices too; the basket only remembers which ones.
-    const { data: addonPrices, error: addonErr } = await admin.from("vps_addon_prices").select("label, product_spec, months, price, currency");
+    // Add-ons (cPanel, backup, disks) are re-priced from vps_addons_priced too; the basket only remembers which ones.
+    const { data: addonPrices, error: addonErr } = await admin.from("vps_addons_priced").select("label, product_spec, months, price, currency");
     if (addonErr) throw addonErr;
     type Addon = { spec: string; label: string; months: number; price: number };
     const cart: { vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string; price: number; currency: string; addons: Addon[] }[] = [];

@@ -4,6 +4,7 @@ import '../../core/format.dart';
 import '../../core/sortable_table.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/catalog_repository.dart';
 import '../../data/repository.dart';
 import '../../data/reseller_repository.dart';
 
@@ -18,12 +19,8 @@ class PurchasedVpsScreen extends StatefulWidget {
 
 enum _Filter { all, assigned, unassigned }
 
-/// "dc_location-lhr" -> "UK", "dc_location-dfw" -> "USA"; anything else is shown as stored.
-String _place(String code) => switch (code) {
-      'dc_location-lhr' => 'UK',
-      'dc_location-dfw' => 'USA',
-      _ => code,
-    };
+/// The customer-facing name of a data centre (Master Data > VPS locations); the stored code if it is no longer listed.
+String _place(String code) => vpsLocationLabel(code);
 
 class _PurchasedVpsScreenState extends State<PurchasedVpsScreen> {
   List<PurchasedVps>? _packages;
@@ -45,7 +42,7 @@ class _PurchasedVpsScreenState extends State<PurchasedVpsScreen> {
     }
     setState(() => _error = null);
     try {
-      final results = await Future.wait([resellerRepo.purchasedVps(tenant.id), resellerRepo.clients()]);
+      final results = await Future.wait([resellerRepo.purchasedVps(tenant.id), resellerRepo.clients(), vpsCartRepo.locations().catchError((_) => <({String code, String label})>[])]);
       if (mounted) {
         setState(() {
           _packages = results[0] as List<PurchasedVps>;

@@ -128,7 +128,13 @@ async function panelLogin(username: string, password: string): Promise<Map<strin
   return check.status >= 300 && check.status < 400 && checkLoc.includes("login") ? null : jar;
 }
 
-type BasketItem = { name: string; productCode: string; periodMonths: number; currency: string; price: number };
+type BasketItem = {
+  name: string; productCode: string; periodMonths: number; currency: string; price: number;
+  basketPricing?: number;                                                   // the panel sends 1 for domains, 0 for VPS
+  options?: unknown;                                                        // productOptionSelections, e.g. { app: null, os: "rhel7" }
+  config?: unknown;                                                         // serviceConfiguration, e.g. { location: "dc_location-lhr" }
+  addons?: { productCode: string; periodMonths: number; price: number }[];  // dependentItems, e.g. a VPS disk
+};
 
 // Reads the panel's CSRF pair from one of its pages (every basket call must send it back as headers).
 async function panelCsrf(jar: Map<string, string>): Promise<{ name: string; value: string } | null> {
@@ -164,16 +170,24 @@ async function addToPanelBasket(jar: Map<string, string>, items: BasketItem[]): 
       body: JSON.stringify({
         jsonrpc: "2.0", method: "addWithInfo", id: null,
         params: [{ paymentItemCountries: [] }, {
-          action: null, basket_pricing: 1, contact: null, currency: i.currency, dependentItems: {}, name: i.name,
+          action: null, basket_pricing: i.basketPricing ?? 1, contact: null, currency: i.currency,
+          dependentItems: Object.fromEntries((i.addons ?? []).map((a, n) => [String(n), {
+            action: null, basket_pricing: 0, contact: null, currency: i.currency, dependentItems: {}, name: null,
+            paymentRef: null, paymentSelections: null, paymentType: "any", periodMonths: a.periodMonths,
+            productCode: a.productCode, productOptionSelections: null, quotedPriceFull: a.price, quotedVAT: 0,
+            service: null, serviceConfiguration: null, upgradeFromProductCode: null,
+          }])),
+          name: i.name,
           paymentRef: null, paymentSelections: null, paymentType: "any", periodMonths: i.periodMonths,
-          productCode: i.productCode, productOptionSelections: null, quotedPriceFull: i.price, quotedVAT: 0,
-          service: null, serviceConfiguration: null, upgradeFromProductCode: null,
+          productCode: i.productCode, productOptionSelections: i.options ?? null, quotedPriceFull: i.price, quotedVAT: 0,
+          service: null, serviceConfiguration: i.config ?? null, upgradeFromProductCode: null,
         }],
       }),
     });
     absorb(jar, res);
     const text = await res.text();
     console.log("stackcp-sso basket add", i.name, res.status, text.slice(0, 600));
+    if (!res.ok) console.log("stackcp-sso basket add: sent", JSON.stringify({ code: i.productCode, months: i.periodMonths, price: i.price, options: i.options, config: i.config, addons: i.addons }));
     let rpcError: string | undefined;
     try { rpcError = JSON.parse(text)?.error?.message; } catch { /* not JSON */ }
     const id = text.match(/\b[0-9a-f]{40}\b/i)?.[0];
@@ -218,14 +232,24 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
   };
 
   const products = await get("/a/catalogue/product");
+  // One entry per billing period a product is sold for. The entry with no action is the normal purchase price for that
+  // period (renewals/upgrades carry an action); if a product has none, every entry is used. price = 20i's cost for the whole period.
+  const periods = (p: any, fallbackMonths: number): { months: number; price: number }[] => {
+    const all = (Array.isArray(p?.pricing) ? p.pricing : []).filter((x: any) => Number.isFinite(Number(x?.price)));
+    const buy = all.filter((x: any) => x?.action == null);
+    const list = buy.length ? buy : all;
+    return list.length
+      ? list.map((x: any) => ({ months: Number(x.periodMonths ?? fallbackMonths), price: Number(x.price) }))
+      : [{ months: fallbackMonths, price: 0 }];
+  };
   const plans = (Array.isArray(products) ? products : [])
     .filter((p: any) => typeof p?.code === "string" && /^vps:[a-z0-9]+$/i.test(p.code) && !p.discontinued)
-    .map((p: any) => ({
+    .flatMap((p: any) => periods(p, 1).map((x) => ({
       code: String(p.code),                                        // vps:a
       label: String(p.label ?? p.code),                            // 1 Core Unmanaged VPS
-      months: Number(p.pricing?.[0]?.periodMonths ?? 1),
-      price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop's price, only a hint
-    }));
+      months: x.months,
+      price: x.price,                                              // 20i's cost for the whole period
+    })));
 
   // SSL certificates live in the same catalogue as tls_certificate:<class-code> (e.g. tls_certificate:tucows-rapidssl).
   const sslPlans = (Array.isArray(products) ? products : [])
@@ -241,12 +265,12 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
   // spec is the 20i productSpec ("vps_addon-cpanelpro"), which is what addVpsAddon wants.
   const vpsAddons = (Array.isArray(products) ? products : [])
     .filter((p: any) => typeof p?.code === "string" && /^vps_addon:(cpanel[a-z0-9]*|backup|disk\d+GB)$/i.test(p.code) && !p.discontinued)
-    .map((p: any) => ({
+    .flatMap((p: any) => periods(p, 1).map((x) => ({
       spec: String(p.code).replace(":", "-"),                      // vps_addon-cpanelpro
       label: String(p.label ?? p.code),                            // cPanel Pro (Max 30 Sites)
-      months: Number(p.pricing?.[0]?.periodMonths ?? 1),
-      price: Number(p.pricing?.[0]?.price ?? 0),                   // the shop price, only a hint
-    }));
+      months: x.months,
+      price: x.price,                                              // 20i's cost for the whole period
+    })));
 
   // Domains: domain:.com ... The entry with no action and a 12-month period is the yearly registration price, i.e. what 20i
   // charges the reseller (the "transfer" entries are ignored).
@@ -268,8 +292,18 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       .map((o: any) => ({ code: String(o.code), label: String(o.label ?? o.code), paid }));
     os = [...pick(reply?.free, false), ...pick(reply?.paid, true)];
   }
+  // Data centres: 20i has no list endpoint; the panel's own order page carries them in its script (dcLocations: [{ text: "UK",
+  // id: "dc_location-lhr" }, ...]), so read them from there. Not a documented API: if the script changes this comes back empty.
+  const vpsLocations: { code: string; label: string }[] = [];
+  try {
+    const js = await (await fetch(`${PANEL}/assets/js/page/s/order-vps.js`, { headers: { Cookie: cookieHeader(jar) } })).text();
+    const block = js.match(/dcLocations\s*:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
+    for (const m of block.matchAll(/text\s*:\s*"([^"]+)"\s*,\s*id\s*:\s*"([^"]+)"/g)) vpsLocations.push({ code: m[2], label: m[1] });
+  } catch (e) {
+    console.error("stackcp-sso: could not read the VPS locations", String(e));
+  }
   console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems,", sslPlans.length, "ssl certificates,", vpsAddons.length, "vps add-ons,", domains.length, "domains");
-  return { vpsPlans: plans, vpsOs: os, sslPlans, vpsAddons, domains };
+  return { vpsPlans: plans, vpsOs: os, vpsLocations, sslPlans, vpsAddons, domains };
 }
 
 Deno.serve(async (req) => {

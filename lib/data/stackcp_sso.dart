@@ -41,15 +41,40 @@ Future<String> stackcpUrl(String panelUrl) async {
 /// Adds domains to the panel's own basket (cp.biznesthub.net) and gives the browser that same panel session, so the
 /// embedded basket shows them. `error` is null on success, otherwise why it failed; `ids` maps each domain to its item id
 /// in the panel basket (needed to remove it later). Best effort: our own basket is the source of truth, this mirrors it.
-Future<({String? error, Map<String, String> ids})> addDomainsToPanelBasket(List<({String name, int years, String tld, String currency, double price})> items) async {
+Future<({String? error, Map<String, String> ids})> addDomainsToPanelBasket(List<({String name, int years, String tld, String currency, double price})> items) => _addToPanelBasket([
+      for (final i in items)
+        {'name': i.name, 'productCode': 'domain:.${i.tld}', 'periodMonths': i.years * 12, 'currency': i.currency, 'price': i.price},
+    ]);
+
+/// Adds one VPS (with its add-ons, e.g. a disk) to the panel basket, the way the panel's own order-vps page does. `ids` maps the
+/// server name to its item id in the panel basket.
+Future<({String? error, Map<String, String> ids})> addVpsToPanelBasket({
+  required String serverName,
+  required String vpsType, // 20i type, e.g. vps-c (shop code vps:c)
+  required int months,
+  required double price,
+  required String osCode,
+  required String location,
+  List<({String spec, int months, double price})> addons = const [], // spec e.g. vps_addon-disk50GB (shop code vps_addon:disk50GB)
+}) =>
+    _addToPanelBasket([
+      {
+        'name': serverName,
+        'productCode': vpsType.replaceFirst('vps-', 'vps:'),
+        'periodMonths': months,
+        'currency': 'SGD',
+        'price': price,
+        'basketPricing': 0,
+        'options': {'app': null, 'os': osCode},
+        'config': {'location': location},
+        'addons': [for (final a in addons) {'productCode': a.spec.replaceFirst('-', ':'), 'periodMonths': a.months, 'price': a.price}],
+      },
+    ]);
+
+Future<({String? error, Map<String, String> ids})> _addToPanelBasket(List<Map<String, Object?>> basket) async {
   if (Env.offline || sb.auth.currentSession == null) return (error: 'not signed in', ids: <String, String>{});
   try {
-    final res = await sb.functions.invoke('stackcp-sso', body: {
-      'basket': [
-        for (final i in items)
-          {'name': i.name, 'productCode': 'domain:.${i.tld}', 'periodMonths': i.years * 12, 'currency': i.currency, 'price': i.price},
-      ],
-    });
+    final res = await sb.functions.invoke('stackcp-sso', body: {'basket': basket});
     final data = res.data as Map?;
     if (data?['sso'] != true) return (error: '${data?['reason'] ?? 'panel login failed'}', ids: <String, String>{});
     for (final c in (data!['cookies'] as List)) {

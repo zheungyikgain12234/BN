@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/models.dart';
+import '../../data/stackcp_sso.dart';
 
 /// VPS with a native UI. Only plans that have a price in Master Data > VPS prices are offered; the reseller picks a
 /// billing period, an operating system and a location, names the server, and adds it to the basket.
@@ -19,8 +20,8 @@ class VpsScreen extends StatefulWidget {
 }
 
 class _VpsScreenState extends State<VpsScreen> {
-  /// Locations the panel offers. The codes are the data-centre values from 20i's addVPS docs (London, Dallas).
-  static const _locations = {'dc_location-lhr': 'UK', 'dc_location-dfw': 'USA'};
+  /// Data centres from Master Data > VPS locations (code -> name shown to customers).
+  Map<String, String> _locations = const {};
 
   Map<String, List<VpsPrice>>? _plans; // by 20i VPS type
   List<VpsOs> _os = const [];
@@ -59,7 +60,8 @@ class _VpsScreenState extends State<VpsScreen> {
       final os = await vpsCartRepo.osOptions();
       // Add-ons are optional: if their table isn't created yet the plans must still work.
       final addons = await vpsCartRepo.addonPrices().catchError((_) => <VpsAddonPrice>[]);
-      if (mounted) setState(() { _plans = plans; _os = os; _addons = addons; });
+      final locations = await vpsCartRepo.locations().catchError((_) => <({String code, String label})>[]);
+      if (mounted) setState(() { _plans = plans; _os = os; _addons = addons; _locations = {for (final l in locations) l.code: l.label}; });
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
@@ -82,10 +84,32 @@ class _VpsScreenState extends State<VpsScreen> {
       showError(context, 'No operating systems are set up yet. Add them in Master Data > VPS operating systems.');
       return;
     }
+    if (_locations.isEmpty) {
+      showError(context, 'No locations are set up yet. Add them in Master Data > VPS locations.');
+      return;
+    }
     try {
       final addons = [_cpanel[type], _backup[type], _disk[type]].whereType<VpsAddonPrice>().toList();
-      await vpsCartRepo.add(serverName: name, plan: plan, os: os, location: _location[type] ?? _locations.keys.first, addons: addons);
-      if (mounted) setState(() => _added.add(type));
+      final location = _location[type] ?? _locations.keys.first;
+      final result = await withLoader(context, () async {
+        // Adding the same server name again replaces it, so drop the old copy from the 20i panel basket first (no duplicates there).
+        final old = await vpsCartRepo.idOf(name);
+        if (old != null) await vpsCartRepo.remove(old);
+        await vpsCartRepo.add(serverName: name, plan: plan, os: os, location: location, addons: addons);
+        // Mirror into the hosting panel's basket (best effort; our own basket is the one that is paid).
+        final res = await addVpsToPanelBasket(
+          serverName: name, vpsType: plan.vpsType, months: plan.months, price: plan.cost, osCode: os.code, location: location, // the panel basket holds 20i's own prices
+          addons: [for (final a in addons) (spec: a.spec, months: a.months, price: a.cost)],
+        );
+        final panelId = res.ids[name];
+        if (panelId != null) await vpsCartRepo.setPanelId(name, panelId);
+        return res;
+      }, message: 'Adding to your basket...');
+      if (!mounted) return;
+      setState(() => _added.add(type));
+      if (result.error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added to your basket, but not to the hosting panel basket: ${result.error}'), behavior: SnackBarBehavior.floating));
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -158,9 +182,10 @@ class _VpsScreenState extends State<VpsScreen> {
             ),
           ),
           SizedBox(
-            width: 110,
+            width: 140,
             child: DropdownButtonFormField<String>(
-              initialValue: _location[type] ?? _locations.keys.first,
+              initialValue: _location[type] ?? _locations.keys.firstOrNull,
+              hint: dropdownHint('Location'),
               isExpanded: true,
               decoration: fieldDecoration(),
               items: [for (final e in _locations.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],

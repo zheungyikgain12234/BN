@@ -454,10 +454,15 @@ class _VpsCartState extends State<_VpsCart> {
     }
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  /// Removing also removes the server from the 20i panel basket (slow), so it shows the spinner; the action returns a warning
+  /// text when the panel part failed.
+  Future<void> _run(Future<String?> Function() action) async {
     try {
-      await action();
+      final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
+      if (warn != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -506,7 +511,7 @@ class _VpsCartState extends State<_VpsCart> {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('${i.planName} · ${i.serverName}', style: T.headlineSm),
-                  Text('${i.osLabel} · ${i.location == 'dc_location-dfw' ? 'USA' : 'UK'}', style: T.bodySm.copyWith(color: C.secondary)),
+                  Text('${i.osLabel} · ${vpsLocationLabel(i.location)}', style: T.bodySm.copyWith(color: C.secondary)),
                   for (final a in i.addons) Text('+ ${a.label} (${_months(a.months)}, ${i.currency} ${a.price.toStringAsFixed(2)})', style: T.bodySm.copyWith(color: C.secondary)),
                 ]),
               ),

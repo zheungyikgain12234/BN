@@ -79,7 +79,7 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   Future<void> _refreshCosts() async {
     setState(() => _refreshing = true);
     try {
-      final n = await withLoader(context, () => masterRepo.refreshDomainCosts(_rows ?? const []), message: 'Updating costs from 20i...');
+      final n = await withLoader(context, () => masterRepo.refreshCosts(def, _rows ?? const []), message: 'Updating costs from 20i...');
       await _load();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n == 0 ? 'Costs are already up to date.' : '$n cost(s) updated from 20i.'), behavior: SnackBarBehavior.floating));
     } catch (e) {
@@ -100,7 +100,7 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final saved = await showDialog<bool>(context: context, builder: (_) => _MasterDialog(def: def, row: row, existingTlds: {for (final r in _rows ?? const <Map<String, dynamic>>[]) '${r['tld']}'}));
+    final saved = await showDialog<bool>(context: context, builder: (_) => _MasterDialog(def: def, row: row, existingTlds: {for (final r in _rows ?? const <Map<String, dynamic>>[]) '${r['tld'] ?? r['code']}'}));
     if (saved == true) _load();
   }
 
@@ -160,7 +160,7 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
       searchText: (r) => def.fields.map((f) => '${r[f.key] ?? ''}').join(' '),
       toolbar: [
         FilledButton.icon(onPressed: () => _edit(), icon: const Icon(Icons.add, size: 18), label: Text('Add ${def.singular}')),
-        if (_isDomain) OutlinedButton.icon(onPressed: _refreshing ? null : _refreshCosts, icon: const Icon(Icons.sync, size: 18), label: Text(_refreshing ? 'Updating...' : 'Update costs from 20i')),
+        if (MasterRepository.hasCost(def)) OutlinedButton.icon(onPressed: _refreshing ? null : _refreshCosts, icon: const Icon(Icons.sync, size: 18), label: Text(_refreshing ? 'Updating...' : 'Update costs from 20i')),
       ],
       columns: [
         for (var i = 0; i < def.fields.length; i++)
@@ -231,6 +231,39 @@ class _MasterDialogState extends State<_MasterDialog> {
     }
   }
 
+  /// VPS plans / add-ons: choose from 20i's own list (the plan, its billing period and 20i's cost come with it).
+  Future<void> _pickPanel() => switch (widget.def.table) {
+        'vps_plan_prices' => _pickVps(),
+        'vps_locations' => _pickLocation(),
+        _ => _pickVpsAddon(),
+      };
+
+  /// VPS locations: choose a data centre from the ones 20i's panel offers.
+  Future<void> _pickLocation() async {
+    try {
+      final all = await withLoader(context, vpsCartRepo.panelLocations, message: 'Loading locations from 20i...');
+      if (!mounted) return;
+      final options = all.where((l) => !widget.existingTlds.contains(l.code)).toList();
+      final chosen = await showDialog<({String code, String label})>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Locations from 20i'),
+          children: [
+            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No more locations to add (or 20i returned none).')),
+            for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text('${o.label}  (${o.code})')),
+          ],
+        ),
+      );
+      if (chosen == null) return;
+      setState(() {
+        _text['code']!.text = chosen.code;
+        _text['label']!.text = chosen.label;
+      });
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   @override
   void dispose() {
     for (final c in _text.values) {
@@ -242,9 +275,7 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// Which field gets a "Pick from 20i" button, for the master tables whose values 20i can supply.
   String? get _pickerField => switch (widget.def.table) {
         'hosting_plan_prices' => 'package_type_id',
-        'vps_plan_prices' => 'vps_type',
         'ssl_plan_prices' => 'class_code',
-        'vps_addon_prices' => 'product_spec',
         'vps_os_options' => 'code',
         _ => null,
       };
@@ -257,17 +288,20 @@ class _MasterDialogState extends State<_MasterDialog> {
       final chosen = await showDialog<({String spec, String label, int months, double price})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: const Text('VPS add-ons from 20i'),
+          title: const Text('VPS add-ons from 20i (cost per period)'),
           children: [
             if (addons.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
-            for (final a in addons) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, a), child: Text('${a.label}  (${a.spec}, shop price ${a.price.toStringAsFixed(2)} / ${a.months} mo)')),
+            for (final a in addons) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, a), child: Text('${a.label}  ·  ${a.months} ${a.months == 1 ? 'month' : 'months'}  ·  cost ${money(a.price)}')),
           ],
         ),
       );
       if (chosen == null) return;
-      _text['product_spec']!.text = chosen.spec;
-      if (_text['label']!.text.trim().isEmpty) _text['label']!.text = chosen.label;
-      if (_text['months']!.text.trim().isEmpty) _text['months']!.text = '${chosen.months}';
+      setState(() {
+        _text['product_spec']!.text = chosen.spec;
+        _text['label']!.text = chosen.label;
+        _text['months']!.text = '${chosen.months}';
+        _cost = chosen.price;
+      });
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -304,24 +338,27 @@ class _MasterDialogState extends State<_MasterDialog> {
       if (!mounted) return;
       final isPlan = widget.def.table == 'vps_plan_prices';
       final options = isPlan
-          ? [for (final p in cat.plans) (code: p.code, label: p.label, hint: 'shop price ${p.price.toStringAsFixed(2)} / ${p.months} mo', months: p.months)]
-          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', months: 0)];
-      final chosen = await showDialog<({String code, String label, String hint, int months})>(
+          ? [for (final p in cat.plans) (code: p.code, label: p.label, hint: '${p.months} ${p.months == 1 ? 'month' : 'months'} · cost ${money(p.price)}', months: p.months, cost: p.price)]
+          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', months: 0, cost: 0.0)];
+      final chosen = await showDialog<({String code, String label, String hint, int months, double cost})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: Text(isPlan ? 'VPS plans from 20i' : 'Operating systems from 20i'),
+          title: Text(isPlan ? 'VPS plans from 20i (cost per period)' : 'Operating systems from 20i'),
           children: [
             if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
-            for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text('${o.label}  (${o.code}, ${o.hint})')),
+            for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text(isPlan ? '${o.label}  ·  ${o.hint}' : '${o.label}  (${o.code}, ${o.hint})')),
           ],
         ),
       );
       if (chosen == null) return;
       if (isPlan) {
         // The shop code vps:a is the 20i type vps-a.
-        _text['vps_type']!.text = chosen.code.replaceFirst('vps:', 'vps-');
-        if (_text['plan_name']!.text.trim().isEmpty) _text['plan_name']!.text = chosen.label;
-        if (_text['months']!.text.trim().isEmpty) _text['months']!.text = '${chosen.months}';
+        setState(() {
+          _text['vps_type']!.text = chosen.code.replaceFirst('vps:', 'vps-');
+          _text['plan_name']!.text = chosen.label;
+          _text['months']!.text = '${chosen.months}';
+          _cost = chosen.cost;
+        });
       } else {
         _text['code']!.text = chosen.code;
         if (_text['label']!.text.trim().isEmpty) _text['label']!.text = chosen.label;
@@ -363,12 +400,18 @@ class _MasterDialogState extends State<_MasterDialog> {
         switch (f.kind) {
           case MasterFieldKind.icon:
             values[f.key] = _icon[f.key];
-          case MasterFieldKind.integer:
+          case MasterFieldKind.integer when !f.readOnly:
             values[f.key] = int.tryParse(_text[f.key]!.text.trim()) ?? 0;
           case MasterFieldKind.decimal:
             values[f.key] = double.tryParse(_text[f.key]!.text.trim()) ?? 0;
           case MasterFieldKind.money when f.readOnly:
-            if (f.key == 'cost_per_year' && _cost != null) values[f.key] = _cost; // only changes when a new extension was picked
+            if ((f.key == 'cost_per_year' || f.key == 'cost') && _cost != null) values[f.key] = _cost; // only changes when something new was picked from 20i
+          case MasterFieldKind.integer:
+            values[f.key] = int.parse(_text[f.key]!.text.trim()); // filled in by the 20i picker
+          case MasterFieldKind.text when f.readOnly:
+            values[f.key] = _text[f.key]!.text.trim(); // filled in by the 20i picker
+          case MasterFieldKind.panel:
+            values[f.key] = _text[f.key]!.text.trim();
           case MasterFieldKind.percent:
             values[f.key] = double.parse(_text[f.key]!.text.trim()); // validated as a number >= 0 by the form
           case MasterFieldKind.money:
@@ -405,23 +448,25 @@ class _MasterDialogState extends State<_MasterDialog> {
               LabeledField(
                 label: f.label,
                 required: f.required,
-                child: f.kind == MasterFieldKind.tld
+                child: (f.kind == MasterFieldKind.tld || f.kind == MasterFieldKind.panel)
                     ? FormField<String>(
                         initialValue: _text[f.key]!.text,
                         validator: (_) => _text[f.key]!.text.isEmpty ? '${f.label} is required' : null,
                         builder: (state) {
                           final tld = _text[f.key]!.text;
+                          final panel = f.kind == MasterFieldKind.panel;
+                          final shown = !panel ? '.$tld' : def.table == 'vps_plan_prices' ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : '${_text['label']!.text}  ·  ${_text['months']!.text} mo';
                           // An existing price keeps its extension; a new one is picked from 20i's list.
                           final locked = widget.row != null;
                           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             InkWell(
-                              onTap: locked ? null : _pickTld,
+                              onTap: locked ? null : (panel ? _pickPanel : _pickTld),
                               child: InputDecorator(
                                 decoration: fieldDecoration().copyWith(errorText: state.errorText, suffixIcon: locked ? null : const Icon(Icons.arrow_drop_down)),
-                                child: tld.isEmpty ? dropdownHint(f.hint) : Text('.$tld', style: T.bodyMd),
+                                child: tld.isEmpty ? dropdownHint(f.hint) : Text(shown, style: T.bodyMd),
                               ),
                             ),
-                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('20i cost: ${money(_cost!)} per year', style: T.bodySm.copyWith(color: C.secondary))),
+                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('20i cost: ${money(_cost!)} per ${panel ? 'period' : 'year'}', style: T.bodySm.copyWith(color: C.secondary))),
                           ]);
                         },
                       )
@@ -454,7 +499,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         ),
                         if (f.key == _pickerField)
                           TextButton.icon(
-                            onPressed: switch (def.table) { 'hosting_plan_prices' => _pick20iPlan, 'ssl_plan_prices' => _pickSsl, 'vps_addon_prices' => _pickVpsAddon, _ => _pickVps },
+                            onPressed: switch (def.table) { 'hosting_plan_prices' => _pick20iPlan, 'ssl_plan_prices' => _pickSsl, _ => _pickVps },
                             icon: const Icon(Icons.cloud_download_outlined, size: 18),
                             label: const Text('Pick from 20i'),
                           ),

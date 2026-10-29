@@ -1,7 +1,7 @@
 import 'catalog_repository.dart';
 import 'repository.dart';
 
-enum MasterFieldKind { text, integer, decimal, icon, tld, money, percent }
+enum MasterFieldKind { text, integer, decimal, icon, tld, money, percent, panel }
 
 class MasterField {
   const MasterField(this.key, this.label, {this.kind = MasterFieldKind.text, this.required = false, this.hint = '', this.readOnly = false});
@@ -93,16 +93,19 @@ const masterDefs = <MasterDef>[
   ),
   MasterDef(
     table: 'vps_plan_prices',
+    readFrom: 'vps_prices',
     title: 'VPS prices',
     singular: 'VPS price',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
     fields: [
-      MasterField('plan_name', 'Plan name', required: true, hint: '1 Core Unmanaged VPS'),
-      MasterField('vps_type', '20i VPS type', required: true, hint: 'Pick from 20i, or vps-a'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '1'),
-      MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '25.00'),
+      MasterField('plan_name', 'Plan', readOnly: true),
+      MasterField('vps_type', 'Plan from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan and period'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
+      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
+      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
@@ -121,16 +124,19 @@ const masterDefs = <MasterDef>[
   ),
   MasterDef(
     table: 'vps_addon_prices',
+    readFrom: 'vps_addons_priced',
     title: 'VPS add-on prices',
     singular: 'VPS add-on price',
     orderBy: 'label',
     usageKind: '',
     valueKey: 'id',
     fields: [
-      MasterField('label', 'Add-on name', required: true, hint: 'cPanel Pro (Max 30 Sites)'),
-      MasterField('product_spec', '20i add-on code', required: true, hint: 'Pick from 20i, or vps_addon-cpanelpro, vps_addon-backup, vps_addon-disk100GB'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, required: true, hint: '1'),
-      MasterField('price', 'Price (whole period)', kind: MasterFieldKind.decimal, required: true, hint: '51.17'),
+      MasterField('label', 'Add-on', readOnly: true),
+      MasterField('product_spec', 'Add-on from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select an add-on and period'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
+      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
+      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
@@ -143,6 +149,18 @@ const masterDefs = <MasterDef>[
     fields: [
       MasterField('label', 'Name', required: true, hint: 'Ubuntu 22.04'),
       MasterField('code', '20i OS code', required: true, hint: 'Pick from 20i, or ubuntu22.04'),
+    ],
+  ),
+  MasterDef(
+    table: 'vps_locations',
+    title: 'VPS locations',
+    singular: 'VPS location',
+    orderBy: 'label',
+    usageKind: '',
+    valueKey: 'id',
+    fields: [
+      MasterField('label', 'Location', readOnly: true),
+      MasterField('code', 'Location from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a location'),
     ],
   ),
 ];
@@ -174,14 +192,32 @@ class MasterRepository {
     await delete(def, row['id'] as String);
   }
 
-  /// Domains: re-reads 20i's current yearly cost for every TLD already in Master Data. Returns how many changed.
-  Future<int> refreshDomainCosts(List<Map<String, dynamic>> rows) async {
-    final fresh = {for (final t in await domainCartRepo.tldsFrom20i()) t.tld: t.cost};
+  /// Master tables whose cost column is copied from 20i (domain TLDs, VPS plans, VPS add-ons).
+  static bool hasCost(MasterDef def) => const {'domain_tld_prices', 'vps_plan_prices', 'vps_addon_prices'}.contains(def.table);
+
+  /// Re-reads 20i's current cost for every row already in Master Data, so selling prices follow 20i's price changes.
+  /// Returns how many changed.
+  Future<int> refreshCosts(MasterDef def, List<Map<String, dynamic>> rows) async {
+    final domains = def.table == 'domain_tld_prices';
+    final costCol = domains ? 'cost_per_year' : 'cost';
+    final Map<String, double> fresh;
+    String keyOf(Map<String, dynamic> r) => switch (def.table) {
+          'domain_tld_prices' => '${r['tld']}',
+          'vps_plan_prices' => '${r['vps_type']}|${r['months']}',
+          _ => '${r['product_spec']}|${r['months']}',
+        };
+    if (domains) {
+      fresh = {for (final t in await domainCartRepo.tldsFrom20i()) t.tld: t.cost};
+    } else if (def.table == 'vps_plan_prices') {
+      fresh = {for (final p in (await vpsCartRepo.panelCatalogue()).plans) '${p.code.replaceFirst('vps:', 'vps-')}|${p.months}': p.price};
+    } else {
+      fresh = {for (final a in await vpsCartRepo.panelAddons()) '${a.spec}|${a.months}': a.price};
+    }
     var changed = 0;
     for (final r in rows) {
-      final cost = fresh['${r['tld']}'];
-      if (cost == null || cost == (r['cost_per_year'] as num?)?.toDouble()) continue;
-      await sb.from('domain_tld_prices').update({'cost_per_year': cost}).eq('id', r['id'] as String);
+      final cost = fresh[keyOf(r)];
+      if (cost == null || cost == (r[costCol] as num?)?.toDouble()) continue;
+      await sb.from(def.table).update({costCol: cost}).eq('id', r['id'] as String);
       changed++;
     }
     return changed;
