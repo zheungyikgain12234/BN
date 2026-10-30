@@ -629,12 +629,14 @@ create table public.hosting_plan_prices (
   months int not null check (months > 0),
   cost numeric(12,2) not null check (cost >= 0),    -- what 20i charges for the whole period (copied from the 20i shop)
   profit_percent numeric(6,2) not null check (profit_percent >= 0),
+  features text[] not null default '{}',      -- what the plan contains, copied from 20i when the plan is picked (e.g. 600MB SSD Web Space)
+  limits jsonb not null default '{}',         -- the plan's full limits and feature flags from 20i (shown in "More info")
   unique (package_type_id, months)
 );
 
 -- What the app and hosting-checkout read: the table plus the computed selling price.
 create view public.hosting_prices with (security_invoker = true) as
-select p.id, p.plan_name, p.package_type_id, p.months, p.cost, p.profit_percent,
+select p.id, p.plan_name, p.package_type_id, p.months, p.cost, p.profit_percent, p.features, p.limits,
        round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency
 from public.hosting_plan_prices p;
 grant select on public.hosting_prices to authenticated, service_role;

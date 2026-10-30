@@ -315,6 +315,33 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
   const everything = Array.isArray(products) ? products : [];
   const catalogueCodes: Record<string, number> = {};
   for (const p of everything) if (typeof p?.code === "string") { const k = p.code.split(":")[0]; catalogueCodes[k] = (catalogueCodes[k] ?? 0) + 1; }
+  // What each plan contains ("600MB SSD Web Space", ...): the panel's order page builds these lines from the plan's limits
+  // (packageAllowanceProvisioningInfo, keyed by shop code) with its own "package" template, so the same rules are applied here.
+  // A plan whose limits can't be read is still offered, just without contents.
+  let allowanceInfo: Record<string, any> = {};
+  try { allowanceInfo = (await get("/n/catalogue/product/packageAllowanceProvisioningInfo")) ?? {}; }
+  catch (e) { console.log("stackcp-sso packageAllowanceProvisioningInfo failed", String(e).slice(0, 300)); }
+  const planFeatures = (limits: any): string[] => {
+    if (!limits || typeof limits !== "object") return [];
+    const inf = (v: any) => v === "INF";
+    const mb = (v: any) => `${Number(v)}MB`;   // the panel shows plain MB, e.g. 600MB, 9000MB, 10240MB
+    const out: string[] = [];
+    out.push(inf(limits.webspace) ? "Unlimited SSD Web Space" : `${mb(limits.webspace)} SSD Web Space`);
+    out.push(inf(limits.bandwidth) ? "Unlimited Bandwidth" : `${mb(limits.bandwidth)}/Month Bandwidth`);
+    out.push(`${inf(limits.mailboxes) ? "Unlimited" : Number(limits.mailboxes)} x ${mb(limits.maxMailboxSize)} Mailboxes`);
+    out.push("Free Wildcard SSL Certificates");
+    if (Number(limits.mysqlDatabases) > 0) out.push(`${Number(limits.mysqlDatabases)} × MySQL Database`);   // "INF" is not shown, like the panel
+    if (limits.malwareScan) out.push("Malware Scanning");
+    out.push("DDoS Protection");
+    if (limits.webBuilder) out.push("Website Builder");
+    return out;
+  };
+  // The full package limits and feature flags (the "More info" view), without the long list of one-click apps.
+  const slimLimits = (limits: any) => {
+    if (!limits || typeof limits !== "object") return {};
+    const { apps: _apps, ...rest } = limits;
+    return rest;
+  };
   const hostingPlans = everything
     .filter((p: any) => typeof p?.code === "string" && /^stack_user_package_allowance:/i.test(p.code) && !p.discontinued)
     .flatMap((p: any) => periods(p, 1).map((x) => ({
@@ -323,6 +350,8 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       label: String(p.label ?? p.code),
       months: x.months,
       price: x.price,                                                          // 20i's cost for the whole period
+      features: planFeatures(allowanceInfo[String(p.code)]?.limits),
+      limits: slimLimits(allowanceInfo[String(p.code)]?.limits),
     })));
   // Data centres: 20i has no list endpoint; the panel's own order page carries them in its script (dcLocations: [{ text: "UK",
   // id: "dc_location-lhr" }, ...]), so read them from there. Not a documented API: if the script changes this comes back empty.

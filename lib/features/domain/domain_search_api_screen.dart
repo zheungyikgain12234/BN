@@ -58,7 +58,7 @@ class _DomainSearchApiScreenState extends State<DomainSearchApiScreen> {
       final label = typed.split('.').first;
       if (!mounted) return;
       // Search the bare name so 20i checks every extension, not only the one that was typed.
-      final res = await withLoader(context, () => sb.functions.invoke('domain-search', body: {'term': label, 'tlds': prices.keys.toList()}), message: 'Searching 20i...');
+      final res = await withLoader(context, () => sb.functions.invoke('domain-search', body: {'term': label, 'tlds': prices.keys.toList()}), message: 'Searching...');
       final data = res.data as Map?;
       if (data?['error'] != null) throw Exception(data!['error']);
       // 20i can return just the extension (".uk"), so put the searched name in front.

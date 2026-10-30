@@ -74,7 +74,7 @@ class _VpsScreenState extends State<VpsScreen> {
             if (plans.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(48),
-                child: Center(child: Text('No VPS plans set up yet. Add them in Master Data > VPS prices.', style: T.bodyMd.copyWith(color: C.secondary))),
+                child: Center(child: Text('No VPS plans set up yet. Add them in Master Data > VPS.', style: T.bodyMd.copyWith(color: C.secondary))),
               )
             else
               GridView.builder(

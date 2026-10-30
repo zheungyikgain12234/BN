@@ -176,7 +176,7 @@ class _PurchasedDomainsScreenState extends State<PurchasedDomainsScreen> {
                               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Text(d.domain, style: T.labelLg, overflow: TextOverflow.ellipsis),
                                 if (d.failed) Text(d.note ?? 'Registration failed', style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
-                                if (d.status == 'test_registered') Text('Sandbox: not registered at 20i', style: T.bodySm.copyWith(color: C.secondary)),
+                                if (d.status == 'test_registered') Text('Sandbox: not registered', style: T.bodySm.copyWith(color: C.secondary)),
                               ]),
                             ),
                           ]),

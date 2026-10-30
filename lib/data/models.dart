@@ -252,12 +252,18 @@ class DomainOrderItem {
       DomainOrderItem(domain: j['domain'] as String, years: j['years'] as int, status: j['status'] as String, note: j['note'] as String?);
 }
 
-/// What the reseller charges for one hosting plan over one billing period (Master Data > Hosting prices).
+/// What the reseller charges for one hosting plan over one billing period (Master Data > Hosting Packages).
 class HostingPrice {
-  const HostingPrice({required this.packageTypeId, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0});
+  const HostingPrice({required this.packageTypeId, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0, this.features = const [], this.limits = const {}});
   final String packageTypeId, planName, currency;
   final int months;
   final double price;
+
+  /// The plan's full limits and feature flags from 20i (webspace, bandwidth, cdnCaching, ...), shown in "More info".
+  final Map<String, dynamic> limits;
+
+  /// What the plan contains, copied from 20i when the plan was picked in Master Data, e.g. "600MB SSD Web Space".
+  final List<String> features;
 
   /// What 20i charges for the whole period (the selling [price] is this plus the profit %).
   final double cost;
@@ -271,6 +277,8 @@ class HostingPrice {
         price: (j['price'] as num).toDouble(),
         currency: kCurrency,
         cost: (j['cost'] as num?)?.toDouble() ?? 0,
+        features: [for (final f in (j['features'] as List? ?? const [])) '$f'],
+        limits: Map<String, dynamic>.from((j['limits'] as Map?) ?? const {}),
       );
 }
 

@@ -132,7 +132,7 @@ class _PurchasedHostingScreenState extends State<PurchasedHostingScreen> {
                           cell: (d) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Text('${d.planName} · ${d.domain}', style: T.labelLg),
                             if (d.failed) Text(d.note ?? 'Package creation failed', style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
-                            if (d.status == 'test_registered') Text('Sandbox: not created at 20i', style: T.bodySm.copyWith(color: C.secondary)),
+                            if (d.status == 'test_registered') Text('Sandbox: not created', style: T.bodySm.copyWith(color: C.secondary)),
                           ]),
                         ),
                         TableCol(label: 'Months', numeric: true, sortValue: (d) => d.months, cell: (d) => Text('${d.months}')),

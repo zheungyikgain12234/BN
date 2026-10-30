@@ -318,7 +318,7 @@ class HostingCartRepository {
 
   /// The panel shop's hosting packages with 20i's cost per period, read through the stackcp-sso login (for the Master Data picker).
   /// [typeId] is the part of the shop code after the colon (e.g. 307997-1-sin), the `type` 20i's addStackUserPackageAllowance takes.
-  Future<List<({String code, String typeId, String label, int months, double price})>> panelHosting() async {
+  Future<List<({String code, String typeId, String label, int months, double price, List<String> features, Map<String, dynamic> limits})>> panelHosting() async {
     final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
     final data = res.data as Map?;
     if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
@@ -326,7 +326,15 @@ class HostingCartRepository {
     final c = (data!['catalogue'] as Map?) ?? const {};
     final list = [
       for (final p in (c['hostingPlans'] as List? ?? const []))
-        (code: '${p['code']}', typeId: '${p['typeId']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 12, price: (p['price'] as num?)?.toDouble() ?? 0),
+        (
+          code: '${p['code']}',
+          typeId: '${p['typeId']}',
+          label: '${p['label']}',
+          months: (p['months'] as num?)?.toInt() ?? 12,
+          price: (p['price'] as num?)?.toDouble() ?? 0,
+          features: [for (final f in (p['features'] as List? ?? const [])) '$f'],
+          limits: Map<String, dynamic>.from((p['limits'] as Map?) ?? const {}),
+        ),
     ];
     if (list.isEmpty) throw 'No hosting packages (stack_user_package_allowance) were found in the 20i shop. Product kinds seen: ${((c['catalogueCodes'] as Map?) ?? const {}).keys.join(', ')}';
     return list;

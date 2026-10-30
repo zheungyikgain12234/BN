@@ -204,7 +204,7 @@ class _SslScreenState extends State<SslScreen> {
       Text('Secure a website with an SSL certificate. Buy it here, then assign it to a client from Purchased SSL.', style: T.bodyMd.copyWith(color: C.onSurfaceVariant)),
       const SizedBox(height: 16),
       if (plans.isEmpty)
-        AppCard(child: Text('No SSL certificates set up yet. Add them in Master Data > SSL prices.', style: T.bodyMd))
+        AppCard(child: Text('No SSL certificates set up yet. Add them in Master Data > SSL.', style: T.bodyMd))
       else
         Form(
           key: _form,

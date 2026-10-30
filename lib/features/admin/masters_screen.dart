@@ -7,6 +7,24 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/masters.dart';
+import '../hosting/hosting_screen.dart';
+
+/// What is inside a hosting package (limits and tick/cross features), in its own window.
+Future<void> _showPackageDetails(BuildContext context, String title, Map<String, dynamic> limits) => showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              title: Text(title, style: T.headlineSm),
+              trailing: IconButton(tooltip: 'Close', icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+            ),
+            Flexible(child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), child: HostingPackageDetails(limits: limits))),
+          ]),
+        ),
+      ),
+    );
 
 /// Admin: manage the lists the software form picks from (categories, tags, pricing models).
 class MastersScreen extends StatelessWidget {
@@ -61,14 +79,14 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   bool _refreshing = false;
 
   /// Domain prices only: proof of who is logged in (the app user and the panel account that reads the 20i prices).
-  String _debug = 'Debug: checking the 20i panel login...';
+  String _debug = 'Debug: checking the panel login...';
 
   Future<void> _checkPanel() async {
     try {
       final p = await domainCartRepo.panelDomains();
-      if (mounted) setState(() => _debug = 'Debug: signed in to the app as ${p.appUser} (super admin)  ·  20i panel login OK as ${p.panelUser}  ·  ${p.tlds.length} TLDs read: ${p.tlds.map((t) => '.${t.tld}').join(' ')}');
+      if (mounted) setState(() => _debug = 'Debug: signed in to the app as ${p.appUser} (super admin)  ·  panel login OK as ${p.panelUser}  ·  ${p.tlds.length} TLDs read: ${p.tlds.map((t) => '.${t.tld}').join(' ')}');
     } catch (e) {
-      if (mounted) setState(() => _debug = 'Debug: 20i panel login FAILED: $e');
+      if (mounted) setState(() => _debug = 'Debug: panel login FAILED: $e');
     }
   }
 
@@ -79,9 +97,9 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   Future<void> _refreshCosts() async {
     setState(() => _refreshing = true);
     try {
-      final n = await withLoader(context, () => masterRepo.refreshCosts(def, _rows ?? const []), message: 'Updating costs from 20i...');
+      final n = await withLoader(context, () => masterRepo.refreshCosts(def, _rows ?? const []), message: 'Updating market prices...');
       await _load();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n == 0 ? 'Costs are already up to date.' : '$n cost(s) updated from 20i.'), behavior: SnackBarBehavior.floating));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(n == 0 ? 'Market prices are already up to date.' : '$n market price(s) updated.'), behavior: SnackBarBehavior.floating));
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -160,10 +178,11 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
       searchText: (r) => def.fields.map((f) => '${r[f.key] ?? ''}').join(' '),
       toolbar: [
         FilledButton.icon(onPressed: () => _edit(), icon: const Icon(Icons.add, size: 18), label: Text('Add ${def.singular}')),
-        if (MasterRepository.hasCost(def)) OutlinedButton.icon(onPressed: _refreshing ? null : _refreshCosts, icon: const Icon(Icons.sync, size: 18), label: Text(_refreshing ? 'Updating...' : 'Update costs from 20i')),
+        if (MasterRepository.hasCost(def)) OutlinedButton.icon(onPressed: _refreshing ? null : _refreshCosts, icon: const Icon(Icons.sync, size: 18), label: Text(_refreshing ? 'Updating...' : 'Update market price')),
       ],
       columns: [
         for (var i = 0; i < def.fields.length; i++)
+          if (def.fields[i].inTable)
           TableCol<Map<String, dynamic>>(
             label: def.fields[i].label,
             numeric: _isNumber(def.fields[i]),
@@ -175,6 +194,18 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
           ),
       ],
       actions: (r) => [
+        if (def.table == 'hosting_plan_prices')
+          IconButton(
+            tooltip: 'View what is inside this package',
+            icon: const Icon(Icons.info_outline, size: 18),
+            onPressed: () => _showPackageDetails(context, '${r['plan_name']}', Map<String, dynamic>.from((r['limits'] as Map?) ?? const {})),
+          ),
+        if (def.table == 'vps_plan_prices')
+          IconButton(
+            tooltip: 'View what is inside this VPS',
+            icon: const Icon(Icons.info_outline, size: 18),
+            onPressed: () => _showVpsDetails(context, '${r['plan_name']}', cores: r['cpu_cores'] as int?, ramMb: r['ram_mb'] as int?, diskGb: r['disk_gb'] as int?),
+          ),
         IconButton(tooltip: 'Edit', icon: const Icon(Icons.edit_outlined, size: 18), onPressed: () => _edit(r)),
         IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline, size: 18, color: C.error), onPressed: () => _delete(r)),
       ],
@@ -214,11 +245,13 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// Domain prices: 20i's yearly cost for the extension picked (the cost column is never typed).
   double? _cost;
   ({int? cores, int? ramMb, int? diskGb})? _specs; // VPS plan specs from 20i, set when a plan is picked
+  List<String>? _features; // hosting plan contents from 20i, set when a plan is picked
+  Map<String, dynamic>? _limits; // hosting plan full limits and feature flags from 20i
 
   /// Domain prices: choose the extension from 20i's own list, with a search box.
   Future<void> _pickTld() async {
     try {
-      final all = await withLoader(context, domainCartRepo.tldsFrom20i, message: 'Loading extensions from 20i...');
+      final all = await withLoader(context, domainCartRepo.tldsFrom20i, message: 'Loading extensions...');
       if (!mounted) return;
       final options = all.where((t) => !widget.existingTlds.contains(t.tld)).toList();
       final chosen = await showDialog<({String tld, double? cost})>(context: context, builder: (_) => _TldPickerDialog(options: options));
@@ -244,15 +277,15 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// VPS locations: choose a data centre from the ones 20i's panel offers.
   Future<void> _pickLocation() async {
     try {
-      final all = await withLoader(context, vpsCartRepo.panelLocations, message: 'Loading locations from 20i...');
+      final all = await withLoader(context, vpsCartRepo.panelLocations, message: 'Loading locations...');
       if (!mounted) return;
       final options = all.where((l) => !widget.existingTlds.contains(l.code)).toList();
       final chosen = await showDialog<({String code, String label})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: const Text('Locations from 20i'),
+          title: const Text('Locations'),
           children: [
-            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No more locations to add (or 20i returned none).')),
+            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No more locations to add.')),
             for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text('${o.label}  (${o.code})')),
           ],
         ),
@@ -281,7 +314,7 @@ class _MasterDialogState extends State<_MasterDialog> {
         _ => null,
       };
 
-  /// VPS add-on prices: choose a cPanel licence, backup or disk from the panel shop's list.
+  /// VPS add-ons: choose a cPanel licence, backup or disk from the panel shop's list.
   Future<void> _pickVpsAddon() async {
     try {
       final addons = await withLoader(context, vpsCartRepo.panelAddons);
@@ -289,12 +322,10 @@ class _MasterDialogState extends State<_MasterDialog> {
       final options = addons.where((a) => !widget.existingTlds.contains(a.spec)).toList();
       final chosen = await showDialog<({String spec, String label, double costPerMonth})>(
         context: context,
-        builder: (ctx) => SimpleDialog(
-          title: const Text('VPS add-ons from 20i (cost per month)'),
-          children: [
-            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No more add-ons to add (or 20i returned none).')),
-            for (final a in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, a), child: Text('${a.label}  ·  cost ${money(a.costPerMonth)} per month')),
-          ],
+        builder: (_) => _PickerDialog(
+          title: 'VPS add-ons',
+          emptyText: 'No more add-ons to add.',
+          items: [for (final a in options) _PickerItem(value: a, title: a.label, subtitle: 'Add-on ID ${a.spec}', price: 'Market price: ${money(a.costPerMonth)} per month')],
         ),
       );
       if (chosen == null) return;
@@ -308,18 +339,19 @@ class _MasterDialogState extends State<_MasterDialog> {
     }
   }
 
-  /// SSL prices: choose a certificate and billing period from the panel shop's list (the class code and 20i's cost come with it).
+  /// SSL: choose a certificate and billing period from the panel shop's list (the class code and market price come with it).
   Future<void> _pickSsl() async {
     try {
-      final plans = await withLoader(context, sslCartRepo.panelCatalogue, message: 'Loading certificates from 20i...');
+      final plans = await withLoader(context, sslCartRepo.panelCatalogue, message: 'Loading certificates...');
       if (!mounted) return;
       final chosen = await showDialog<({String code, String label, int months, double price})>(
         context: context,
-        builder: (ctx) => SimpleDialog(
-          title: const Text('SSL certificates from 20i (cost per period)'),
-          children: [
-            if (plans.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
-            for (final p in plans) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, p), child: Text('${p.label}  ·  ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  cost ${money(p.price)}  (${p.code})')),
+        builder: (_) => _PickerDialog(
+          title: 'SSL certificates',
+          emptyText: 'Nothing to show.',
+          items: [
+            for (final p in plans)
+              _PickerItem(value: p, title: p.label, subtitle: 'Billed every ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  Certificate ID ${p.code}', price: 'Market price: ${money(p.price)} per period'),
           ],
         ),
       );
@@ -335,58 +367,78 @@ class _MasterDialogState extends State<_MasterDialog> {
     }
   }
 
-  /// VPS prices / operating systems: choose from the panel shop's list (read through the panel login).
+  /// VPS plans / operating systems: choose from the panel shop's list (read through the panel login).
   Future<void> _pickVps() async {
     try {
       final cat = await withLoader(context, vpsCartRepo.panelCatalogue);
       if (!mounted) return;
       final isPlan = widget.def.table == 'vps_plan_prices';
+      if (!isPlan) {
+        final chosen = await showDialog<({String code, String label})>(
+          context: context,
+          builder: (ctx) => SimpleDialog(
+            title: const Text('Operating systems'),
+            children: [
+              if (cat.os.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing to show.')),
+              for (final o in cat.os) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, (code: o.code, label: o.label)), child: Text('${o.label}  (${o.code}, ${o.paid ? 'paid' : 'free'})')),
+            ],
+          ),
+        );
+        if (chosen == null) return;
+        _text['code']!.text = chosen.code;
+        if (_text['label']!.text.trim().isEmpty) _text['label']!.text = chosen.label;
+        return;
+      }
       // Plans already in Master Data are not offered again (one price per plan; the term is chosen when ordering).
-      final options = isPlan
-          ? [for (final p in vpsPlansPerMonth(cat.plans).where((p) => !widget.existingTlds.contains(p.code.replaceFirst('vps:', 'vps-')))) (code: p.code, label: p.label, hint: 'cost ${money(p.costPerMonth)} per month', cost: p.costPerMonth, cores: p.cores, ramMb: p.ramMb, diskGb: p.diskGb)]
-          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', cost: 0.0, cores: null as int?, ramMb: null as int?, diskGb: null as int?)];
-      final chosen = await showDialog<({String code, String label, String hint, double cost, int? cores, int? ramMb, int? diskGb})>(
+      final options = vpsPlansPerMonth(cat.plans).where((p) => !widget.existingTlds.contains(p.code.replaceFirst('vps:', 'vps-'))).toList();
+      final chosen = await showDialog<({String code, String label, double costPerMonth, int? cores, int? ramMb, int? diskGb})>(
         context: context,
-        builder: (ctx) => SimpleDialog(
-          title: Text(isPlan ? 'VPS plans from 20i (cost per month)' : 'Operating systems from 20i'),
-          children: [
-            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
-            for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text(isPlan ? '${o.label}  ·  ${o.hint}' : '${o.label}  (${o.code}, ${o.hint})')),
+        builder: (_) => _PickerDialog(
+          title: 'VPS plans',
+          emptyText: 'No more plans to add.',
+          items: [
+            for (final p in options)
+              _PickerItem(
+                value: p,
+                title: p.label,
+                subtitle: 'Plan ID ${p.code.replaceFirst('vps:', 'vps-')}',
+                price: 'Market price: ${money(p.costPerMonth)} per month',
+                onInfo: (ctx) => _showVpsDetails(ctx, p.label, cores: p.cores, ramMb: p.ramMb, diskGb: p.diskGb),
+              ),
           ],
         ),
       );
       if (chosen == null) return;
-      if (isPlan) {
-        // The shop code vps:a is the 20i type vps-a.
-        setState(() {
-          _text['vps_type']!.text = chosen.code.replaceFirst('vps:', 'vps-');
-          _text['plan_name']!.text = chosen.label;
-          _cost = chosen.cost;
-          _specs = (cores: chosen.cores, ramMb: chosen.ramMb, diskGb: chosen.diskGb);
-        });
-      } else {
-        _text['code']!.text = chosen.code;
-        if (_text['label']!.text.trim().isEmpty) _text['label']!.text = chosen.label;
-      }
+      // The shop code vps:a is the type vps-a.
+      setState(() {
+        _text['vps_type']!.text = chosen.code.replaceFirst('vps:', 'vps-');
+        _text['plan_name']!.text = chosen.label;
+        _cost = chosen.costPerMonth;
+        _specs = (cores: chosen.cores, ramMb: chosen.ramMb, diskGb: chosen.diskGb);
+      });
     } catch (e) {
       if (mounted) showError(context, e);
     }
   }
 
-  /// Hosting prices: choose the plan and billing period from the 20i shop (the plan id and 20i's cost come with it).
+  /// Hosting packages: choose the plan and billing period from the shop (the plan id and market price come with it).
   Future<void> _pickHosting() async {
     try {
-      final plans = await withLoader(context, hostingCartRepo.panelHosting, message: 'Loading hosting plans from 20i...');
+      final plans = await withLoader(context, hostingCartRepo.panelHosting, message: 'Loading hosting plans...');
       if (!mounted) return;
-      final chosen = await showDialog<({String code, String typeId, String label, int months, double price})>(
+      final chosen = await showDialog<({String code, String typeId, String label, int months, double price, List<String> features, Map<String, dynamic> limits})>(
         context: context,
-        builder: (ctx) => SimpleDialog(
-          title: const Text('Hosting plans from 20i (cost per period)'),
-          children: [
+        builder: (_) => _PickerDialog(
+          title: 'Hosting packages',
+          emptyText: 'Nothing to show.',
+          items: [
             for (final p in plans)
-              SimpleDialogOption(
-                onPressed: () => Navigator.pop(ctx, p),
-                child: Text('${p.label}  ·  ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  cost ${money(p.price)}  (${p.typeId})'),
+              _PickerItem(
+                value: p,
+                title: p.label,
+                subtitle: 'Billed every ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  Plan ID ${p.typeId}',
+                price: 'Market price: ${money(p.price)}',
+                onInfo: (ctx) => _showPackageDetails(ctx, p.label, p.limits),
               ),
           ],
         ),
@@ -397,6 +449,8 @@ class _MasterDialogState extends State<_MasterDialog> {
         _text['plan_name']!.text = chosen.label;
         _text['months']!.text = '${chosen.months}';
         _cost = chosen.price;
+        _features = chosen.features;
+        _limits = chosen.limits;
       });
     } catch (e) {
       if (mounted) showError(context, e);
@@ -435,6 +489,10 @@ class _MasterDialogState extends State<_MasterDialog> {
             values[f.key] = t.isEmpty ? null : t;
         }
       }
+      if (widget.def.table == 'hosting_plan_prices' && _features != null) {
+        values['features'] = _features;
+        values['limits'] = _limits ?? const {};
+      }
       if (widget.def.table == 'vps_plan_prices' && _specs != null) {
         values['cpu_cores'] = _specs!.cores;
         values['ram_mb'] = _specs!.ramMb;
@@ -445,7 +503,19 @@ class _MasterDialogState extends State<_MasterDialog> {
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
-        showError(context, e.toString().contains('duplicate key') ? 'This ${widget.def.singular} already exists.' : e);
+        if (e.toString().contains('duplicate key')) {
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              icon: const Icon(Icons.info_outline, size: 32, color: C.primary),
+              title: Text('This ${widget.def.singular} is already added'),
+              content: Text('A ${widget.def.singular} with these details is already in Master Data, so it can\'t be added a second time.\n\nTo change it, close this window and use the Edit (pencil) button on the existing row instead.'),
+              actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+            ),
+          );
+        } else {
+          showError(context, e);
+        }
       }
     }
   }
@@ -479,11 +549,11 @@ class _MasterDialogState extends State<_MasterDialog> {
                             InkWell(
                               onTap: locked ? null : (panel ? _pickPanel : _pickTld),
                               child: InputDecorator(
-                                decoration: fieldDecoration().copyWith(errorText: state.errorText, suffixIcon: locked ? null : const Icon(Icons.arrow_drop_down)),
-                                child: tld.isEmpty ? dropdownHint(f.hint) : Text(shown, style: T.bodyMd),
+                                decoration: fieldDecoration().copyWith(enabled: !locked, errorText: state.errorText, suffixIcon: locked ? const Icon(Icons.lock_outline, size: 18) : const Icon(Icons.arrow_drop_down)),
+                                child: tld.isEmpty ? dropdownHint(f.hint) : Text(shown, style: T.bodyMd.copyWith(color: locked ? C.outline : null)),
                               ),
                             ),
-                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('20i cost: ${money(_cost!)} per ${def.table == 'vps_plan_prices' || def.table == 'vps_addon_prices' ? 'month' : panel ? 'period' : 'year'}', style: T.bodySm.copyWith(color: C.secondary))),
+                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Market price: ${money(_cost!)} per ${def.table == 'vps_plan_prices' || def.table == 'vps_addon_prices' ? 'month' : panel ? 'period' : 'year'}', style: T.bodySm.copyWith(color: C.secondary))),
                           ]);
                         },
                       )
@@ -518,7 +588,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                           TextButton.icon(
                             onPressed: _pickVps,
                             icon: const Icon(Icons.cloud_download_outlined, size: 18),
-                            label: const Text('Pick from 20i'),
+                            label: const Text('Pick from the list'),
                           ),
                       ]),
               ),
@@ -640,4 +710,123 @@ class _TldPickerDialogState extends State<_TldPickerDialog> {
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
     );
   }
+}
+
+/// One row in [_PickerDialog]: what is shown, and the value handed back when it is selected.
+class _PickerItem<V> {
+  const _PickerItem({required this.value, required this.title, required this.subtitle, required this.price, this.onInfo});
+  final V value;
+  final String title, subtitle, price;
+
+  /// Opens a window with what is inside; when null there is no "View details" button.
+  final void Function(BuildContext context)? onInfo;
+}
+
+/// The list shown when adding a hosting package, VPS, SSL certificate or add-on: one card per choice with its market price,
+/// an optional "View details" button and a "Select" button.
+class _PickerDialog<V> extends StatelessWidget {
+  const _PickerDialog({required this.title, required this.items, required this.emptyText});
+  final String title, emptyText;
+  final List<_PickerItem<V>> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: C.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 8, 0),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: T.headlineSm),
+                  Text('Choose one to add.${items.any((i) => i.onInfo != null) ? ' Use "View details" to see what is inside first.' : ''}', style: T.bodySm.copyWith(color: C.secondary)),
+                ]),
+              ),
+              IconButton(tooltip: 'Close', icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+              children: [
+                if (items.isEmpty) Padding(padding: const EdgeInsets.all(16), child: Text(emptyText)),
+                for (final i in items)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(border: Border.all(color: C.outline.withValues(alpha: 0.4)), borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(i.title, style: T.labelLg),
+                          const SizedBox(height: 4),
+                          Text(i.subtitle, style: T.bodySm.copyWith(color: C.secondary)),
+                          const SizedBox(height: 4),
+                          Text(i.price, style: T.labelLg.copyWith(color: C.primary)),
+                        ]),
+                      ),
+                      const SizedBox(width: 12),
+                      if (i.onInfo != null) ...[
+                        OutlinedButton.icon(icon: const Icon(Icons.info_outline, size: 16), label: const Text('View details'), onPressed: () => i.onInfo!(context)),
+                        const SizedBox(width: 8),
+                      ],
+                      FilledButton(onPressed: () => Navigator.pop(context, i.value), child: const Text('Select')),
+                    ]),
+                  ),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// What a VPS plan comes with (memory, cores, disk), in its own window.
+Future<void> _showVpsDetails(BuildContext context, String title, {int? cores, int? ramMb, int? diskGb}) {
+  String gb(num v) => v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(1);
+  final rows = <(IconData, String, String)>[
+    (Icons.memory, 'Memory', ramMb == null ? '—' : '${gb(ramMb / 1024)} GB'),
+    (Icons.developer_board, 'CPU cores', cores == null ? '—' : '$cores'),
+    (Icons.storage, 'SSD disk', diskGb == null ? '—' : '$diskGb GB'),
+  ];
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => Dialog(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            title: Text(title, style: T.headlineSm),
+            trailing: IconButton(tooltip: 'Close', icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: AppCard(
+              child: Column(children: [
+                for (final r in rows)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(children: [
+                      Icon(r.$1, size: 20, color: C.primary),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(r.$2, style: T.bodyMd.copyWith(color: C.secondary))),
+                      Text(r.$3, style: T.labelLg),
+                    ]),
+                  ),
+                if (cores == null && ramMb == null && diskGb == null)
+                  Text('The specs are not saved for this plan yet. Pick the plan again in Master Data > VPS.', style: T.bodySm.copyWith(color: C.secondary)),
+              ]),
+            ),
+          ),
+        ]),
+      ),
+    ),
+  );
 }

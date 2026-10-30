@@ -136,7 +136,7 @@ class _PurchasedSslScreenState extends State<PurchasedSslScreen> {
                             Text(d.hostname, style: T.labelLg),
                             Text('${d.planName} · ${_verify[d.verification] ?? d.verification} verification', style: T.bodySm.copyWith(color: C.secondary)),
                             if (d.failed) Text(d.note ?? 'SSL order failed', style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
-                            if (d.status == 'test_registered') Text('Sandbox: not ordered at 20i', style: T.bodySm.copyWith(color: C.secondary)),
+                            if (d.status == 'test_registered') Text('Sandbox: not ordered', style: T.bodySm.copyWith(color: C.secondary)),
                           ]),
                         ),
                         TableCol(label: 'Months', numeric: true, sortValue: (d) => d.months, cell: (d) => Text('${d.months}')),

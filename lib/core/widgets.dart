@@ -162,11 +162,13 @@ InputDecoration fieldDecoration({String? hint, IconData? prefix, Widget? suffix}
     prefixIcon: prefix == null ? null : Icon(prefix, size: 18, color: C.secondary),
     suffixIcon: suffix,
     filled: true,
-    fillColor: C.surfaceLow,
+    // Active boxes are white; disabled ones are flat grey with a faint border, so the two are easy to tell apart.
+    fillColor: WidgetStateColor.resolveWith((s) => s.contains(WidgetState.disabled) ? const Color(0xFFDCE0DD) : C.surfaceLowest),
     isDense: true,
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
     border: b(C.outlineVariant),
-    enabledBorder: b(C.outlineVariant),
+    enabledBorder: b(C.outline),
+    disabledBorder: b(const Color(0xFFC9CFCB)),
     focusedBorder: b(C.primary, 1.5),
     errorBorder: b(C.error),
     focusedErrorBorder: b(C.error, 1.5),
@@ -226,7 +228,7 @@ class ErrorRetry extends StatelessWidget {
 
 /// Runs [task] with a centred spinner box over the whole screen, so nobody clicks again while it is working.
 /// Use it around anything slow, such as a call to 20i.
-Future<R> withLoader<R>(BuildContext context, Future<R> Function() task, {String message = 'Contacting 20i...'}) async {
+Future<R> withLoader<R>(BuildContext context, Future<R> Function() task, {String message = 'Please wait...'}) async {
   final nav = Navigator.of(context, rootNavigator: true);
   showDialog<void>(
     context: context,

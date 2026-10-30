@@ -216,7 +216,7 @@ class _DomainCartState extends State<_DomainCart> {
       final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
       if (warn != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the panel basket: $warn'), behavior: SnackBarBehavior.floating));
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -340,7 +340,7 @@ class _HostingCartState extends State<_HostingCart> {
       final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
       if (warn != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the panel basket: $warn'), behavior: SnackBarBehavior.floating));
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -466,7 +466,7 @@ class _VpsCartState extends State<_VpsCart> {
       final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
       if (warn != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the panel basket: $warn'), behavior: SnackBarBehavior.floating));
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -598,7 +598,7 @@ class _SslCartState extends State<_SslCart> {
       final warn = await withLoader(context, action, message: 'Updating your basket...');
       await _load();
       if (warn != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the 20i panel basket: $warn'), behavior: SnackBarBehavior.floating));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed here, but not from the panel basket: $warn'), behavior: SnackBarBehavior.floating));
       }
     } catch (e) {
       if (mounted) showError(context, e);

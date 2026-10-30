@@ -4,13 +4,16 @@ import 'repository.dart';
 enum MasterFieldKind { text, integer, decimal, icon, tld, money, percent, panel }
 
 class MasterField {
-  const MasterField(this.key, this.label, {this.kind = MasterFieldKind.text, this.required = false, this.hint = '', this.readOnly = false});
+  const MasterField(this.key, this.label, {this.kind = MasterFieldKind.text, this.required = false, this.hint = '', this.readOnly = false, this.inTable = true});
   final String key, label, hint;
   final MasterFieldKind kind;
   final bool required;
 
-  /// Shown in the table but not typed in the form (it is filled in from 20i).
+  /// Shown in the table but not typed in the form (it is filled in by the picker).
   final bool readOnly;
+
+  /// False for a value that is saved but not worth a column (e.g. the billing months).
+  final bool inTable;
 }
 
 /// Describes one master table so a single screen and form can manage all of them.
@@ -65,14 +68,14 @@ const masterDefs = <MasterDef>[
   MasterDef(
     table: 'domain_tld_prices',
     readFrom: 'domain_prices',
-    title: 'Domain prices',
-    singular: 'domain price',
+    title: 'Domain names',
+    singular: 'domain name',
     orderBy: 'tld',
     usageKind: '',
     valueKey: 'id',
     fields: [
       MasterField('tld', 'TLD', kind: MasterFieldKind.tld, required: true, hint: 'Select an extension'),
-      MasterField('cost_per_year', 'Cost per year (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('cost_per_year', 'Market price per year', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
       MasterField('price_per_year', 'Selling price per year', kind: MasterFieldKind.money, readOnly: true),
     ],
@@ -80,32 +83,32 @@ const masterDefs = <MasterDef>[
   MasterDef(
     table: 'hosting_plan_prices',
     readFrom: 'hosting_prices',
-    title: 'Hosting Package prices',
-    singular: 'hosting package price',
+    title: 'Hosting Packages',
+    singular: 'hosting package',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
     fields: [
       MasterField('plan_name', 'Plan', readOnly: true),
-      MasterField('package_type_id', 'Plan from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan and period'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
-      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('package_type_id', 'Plan ID', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan and period'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true, inTable: false),
+      MasterField('cost', 'Market price per month', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
-      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('price', 'Selling price per month', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
     table: 'vps_plan_prices',
     readFrom: 'vps_prices',
-    title: 'VPS prices',
-    singular: 'VPS price',
+    title: 'VPS',
+    singular: 'VPS',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
     fields: [
       MasterField('plan_name', 'Plan', readOnly: true),
-      MasterField('vps_type', 'Plan from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan'),
-      MasterField('cost_per_month', 'Cost per month (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('vps_type', 'Plan ID', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan'),
+      MasterField('cost_per_month', 'Market price per month', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
       MasterField('price_per_month', 'Selling price per month', kind: MasterFieldKind.money, readOnly: true),
     ],
@@ -113,16 +116,16 @@ const masterDefs = <MasterDef>[
   MasterDef(
     table: 'ssl_plan_prices',
     readFrom: 'ssl_prices',
-    title: 'SSL prices',
-    singular: 'SSL price',
+    title: 'SSL',
+    singular: 'SSL certificate',
     orderBy: 'plan_name',
     usageKind: '',
     valueKey: 'id',
     fields: [
       MasterField('plan_name', 'Certificate', readOnly: true),
-      MasterField('class_code', 'Certificate from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a certificate and period'),
+      MasterField('class_code', 'Certificate ID', kind: MasterFieldKind.panel, required: true, hint: 'Select a certificate and period'),
       MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
-      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('cost', 'Market price per period', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
       MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
     ],
@@ -130,15 +133,15 @@ const masterDefs = <MasterDef>[
   MasterDef(
     table: 'vps_addon_prices',
     readFrom: 'vps_addons_priced',
-    title: 'VPS add-on prices',
-    singular: 'VPS add-on price',
+    title: 'VPS add-ons',
+    singular: 'VPS add-on',
     orderBy: 'label',
     usageKind: '',
     valueKey: 'id',
     fields: [
       MasterField('label', 'Add-on', readOnly: true),
-      MasterField('product_spec', 'Add-on from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select an add-on'),
-      MasterField('cost_per_month', 'Cost per month (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('product_spec', 'Add-on ID', kind: MasterFieldKind.panel, required: true, hint: 'Select an add-on'),
+      MasterField('cost_per_month', 'Market price per month', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
       MasterField('price_per_month', 'Selling price per month', kind: MasterFieldKind.money, readOnly: true),
     ],
@@ -152,7 +155,7 @@ const masterDefs = <MasterDef>[
     valueKey: 'id',
     fields: [
       MasterField('label', 'Name', required: true, hint: 'Ubuntu 22.04'),
-      MasterField('code', '20i OS code', required: true, hint: 'Pick from 20i, or ubuntu22.04'),
+      MasterField('code', 'OS code', required: true, hint: 'Pick from the list, or type e.g. ubuntu22.04'),
     ],
   ),
   MasterDef(
@@ -164,7 +167,7 @@ const masterDefs = <MasterDef>[
     valueKey: 'id',
     fields: [
       MasterField('label', 'Location', readOnly: true),
-      MasterField('code', 'Location from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a location'),
+      MasterField('code', 'Location ID', kind: MasterFieldKind.panel, required: true, hint: 'Select a location'),
     ],
   ),
 ];
