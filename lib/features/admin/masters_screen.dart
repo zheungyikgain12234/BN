@@ -100,7 +100,7 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
   }
 
   Future<void> _edit([Map<String, dynamic>? row]) async {
-    final saved = await showDialog<bool>(context: context, builder: (_) => _MasterDialog(def: def, row: row, existingTlds: {for (final r in _rows ?? const <Map<String, dynamic>>[]) '${r['tld'] ?? r['code']}'}));
+    final saved = await showDialog<bool>(context: context, builder: (_) => _MasterDialog(def: def, row: row, existingTlds: {for (final r in _rows ?? const <Map<String, dynamic>>[]) '${r['tld'] ?? r['code'] ?? r['vps_type'] ?? r['product_spec']}'}));
     if (saved == true) _load();
   }
 
@@ -286,13 +286,14 @@ class _MasterDialogState extends State<_MasterDialog> {
     try {
       final addons = await withLoader(context, vpsCartRepo.panelAddons);
       if (!mounted) return;
-      final chosen = await showDialog<({String spec, String label, int months, double price})>(
+      final options = addons.where((a) => !widget.existingTlds.contains(a.spec)).toList();
+      final chosen = await showDialog<({String spec, String label, double costPerMonth})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: const Text('VPS add-ons from 20i (cost per period)'),
+          title: const Text('VPS add-ons from 20i (cost per month)'),
           children: [
-            if (addons.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
-            for (final a in addons) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, a), child: Text('${a.label}  ·  ${a.months} ${a.months == 1 ? 'month' : 'months'}  ·  cost ${money(a.price)}')),
+            if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('No more add-ons to add (or 20i returned none).')),
+            for (final a in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, a), child: Text('${a.label}  ·  cost ${money(a.costPerMonth)} per month')),
           ],
         ),
       );
@@ -300,8 +301,7 @@ class _MasterDialogState extends State<_MasterDialog> {
       setState(() {
         _text['product_spec']!.text = chosen.spec;
         _text['label']!.text = chosen.label;
-        _text['months']!.text = '${chosen.months}';
-        _cost = chosen.price;
+        _cost = chosen.costPerMonth;
       });
     } catch (e) {
       if (mounted) showError(context, e);
@@ -341,13 +341,14 @@ class _MasterDialogState extends State<_MasterDialog> {
       final cat = await withLoader(context, vpsCartRepo.panelCatalogue);
       if (!mounted) return;
       final isPlan = widget.def.table == 'vps_plan_prices';
+      // Plans already in Master Data are not offered again (one price per plan; the term is chosen when ordering).
       final options = isPlan
-          ? [for (final p in cat.plans) (code: p.code, label: p.label, hint: '${p.months} ${p.months == 1 ? 'month' : 'months'} · cost ${money(p.price)}', months: p.months, cost: p.price, cores: p.cores, ramMb: p.ramMb, diskGb: p.diskGb)]
-          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', months: 0, cost: 0.0, cores: null as int?, ramMb: null as int?, diskGb: null as int?)];
-      final chosen = await showDialog<({String code, String label, String hint, int months, double cost, int? cores, int? ramMb, int? diskGb})>(
+          ? [for (final p in vpsPlansPerMonth(cat.plans).where((p) => !widget.existingTlds.contains(p.code.replaceFirst('vps:', 'vps-')))) (code: p.code, label: p.label, hint: 'cost ${money(p.costPerMonth)} per month', cost: p.costPerMonth, cores: p.cores, ramMb: p.ramMb, diskGb: p.diskGb)]
+          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', cost: 0.0, cores: null as int?, ramMb: null as int?, diskGb: null as int?)];
+      final chosen = await showDialog<({String code, String label, String hint, double cost, int? cores, int? ramMb, int? diskGb})>(
         context: context,
         builder: (ctx) => SimpleDialog(
-          title: Text(isPlan ? 'VPS plans from 20i (cost per period)' : 'Operating systems from 20i'),
+          title: Text(isPlan ? 'VPS plans from 20i (cost per month)' : 'Operating systems from 20i'),
           children: [
             if (options.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Nothing came back from 20i.')),
             for (final o in options) SimpleDialogOption(onPressed: () => Navigator.pop(ctx, o), child: Text(isPlan ? '${o.label}  ·  ${o.hint}' : '${o.label}  (${o.code}, ${o.hint})')),
@@ -360,7 +361,6 @@ class _MasterDialogState extends State<_MasterDialog> {
         setState(() {
           _text['vps_type']!.text = chosen.code.replaceFirst('vps:', 'vps-');
           _text['plan_name']!.text = chosen.label;
-          _text['months']!.text = '${chosen.months}';
           _cost = chosen.cost;
           _specs = (cores: chosen.cores, ramMb: chosen.ramMb, diskGb: chosen.diskGb);
         });
@@ -417,7 +417,7 @@ class _MasterDialogState extends State<_MasterDialog> {
           case MasterFieldKind.decimal:
             values[f.key] = double.tryParse(_text[f.key]!.text.trim()) ?? 0;
           case MasterFieldKind.money when f.readOnly:
-            if ((f.key == 'cost_per_year' || f.key == 'cost') && _cost != null) values[f.key] = _cost; // only changes when something new was picked from 20i
+            if ((f.key == 'cost_per_year' || f.key == 'cost' || f.key == 'cost_per_month') && _cost != null) values[f.key] = _cost; // only changes when something new was picked from 20i
           case MasterFieldKind.integer:
             values[f.key] = int.parse(_text[f.key]!.text.trim()); // filled in by the 20i picker
           case MasterFieldKind.text when f.readOnly:
@@ -472,7 +472,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                         builder: (state) {
                           final tld = _text[f.key]!.text;
                           final panel = f.kind == MasterFieldKind.panel;
-                          final shown = !panel ? '.$tld' : (def.table == 'vps_plan_prices' || def.table == 'hosting_plan_prices' || def.table == 'ssl_plan_prices') ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : '${_text['label']!.text}  ·  ${_text['months']!.text} mo';
+                          final shown = !panel ? '.$tld' : def.table == 'vps_plan_prices' ? _text['plan_name']!.text : (def.table == 'hosting_plan_prices' || def.table == 'ssl_plan_prices') ? '${_text['plan_name']!.text}  ·  ${_text['months']!.text} mo' : def.table == 'vps_locations' ? '${_text['label']!.text}  (${_text['code']!.text})' : _text['label']!.text;
                           // An existing price keeps its extension; a new one is picked from 20i's list.
                           final locked = widget.row != null;
                           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -483,7 +483,7 @@ class _MasterDialogState extends State<_MasterDialog> {
                                 child: tld.isEmpty ? dropdownHint(f.hint) : Text(shown, style: T.bodyMd),
                               ),
                             ),
-                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('20i cost: ${money(_cost!)} per ${panel ? 'period' : 'year'}', style: T.bodySm.copyWith(color: C.secondary))),
+                            if (_cost != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('20i cost: ${money(_cost!)} per ${def.table == 'vps_plan_prices' || def.table == 'vps_addon_prices' ? 'month' : panel ? 'period' : 'year'}', style: T.bodySm.copyWith(color: C.secondary))),
                           ]);
                         },
                       )

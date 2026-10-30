@@ -341,6 +341,21 @@ class HostingCartRepository {
   }
 }
 
+/// One entry per VPS plan from the panel catalogue (which lists a plan once per billing period), with 20i's cost per month
+/// taken from its shortest period.
+List<({String code, String label, double costPerMonth, int? cores, int? ramMb, int? diskGb})> vpsPlansPerMonth(
+    List<({String code, String label, int months, double price, int? cores, int? ramMb, int? diskGb})> plans) {
+  final byCode = <String, ({String code, String label, int months, double price, int? cores, int? ramMb, int? diskGb})>{};
+  for (final p in plans) {
+    final cur = byCode[p.code];
+    if (cur == null || p.months < cur.months) byCode[p.code] = p;
+  }
+  return [
+    for (final p in byCode.values)
+      (code: p.code, label: p.label, costPerMonth: (p.price / (p.months < 1 ? 1 : p.months) * 100).round() / 100, cores: p.cores, ramMb: p.ramMb, diskGb: p.diskGb),
+  ];
+}
+
 /// Customer-facing names of the data centres, by 20i code (Master Data > VPS locations). Filled whenever the list is read.
 final Map<String, String> vpsLocationNames = {};
 String vpsLocationLabel(String code) => vpsLocationNames[code] ?? code;
@@ -349,7 +364,7 @@ String vpsLocationLabel(String code) => vpsLocationNames[code] ?? code;
 class VpsCartRepository {
   /// Selling prices (20i cost + profit %), from the vps_prices view.
   Future<List<VpsPrice>> prices() async {
-    final rows = await sb.from('vps_prices').select().order('plan_name').order('months');
+    final rows = await sb.from('vps_prices').select().order('plan_name');
     return rows.map<VpsPrice>(VpsPrice.fromJson).toList();
   }
 
@@ -382,20 +397,26 @@ class VpsCartRepository {
 
   /// cPanel, backup and disk add-ons the reseller sells (Master Data > VPS add-on prices).
   Future<List<VpsAddonPrice>> addonPrices() async {
-    final rows = await sb.from('vps_addons_priced').select().order('label').order('months');
+    final rows = await sb.from('vps_addons_priced').select().order('label');
     return rows.map<VpsAddonPrice>(VpsAddonPrice.fromJson).toList();
   }
 
   /// The panel shop's VPS add-ons (cPanel, backup, disks), for the Master Data picker. Price is a hint only.
-  Future<List<({String spec, String label, int months, double price})>> panelAddons() async {
+  /// One entry per add-on, with 20i's cost per month taken from its shortest billing period.
+  Future<List<({String spec, String label, double costPerMonth})>> panelAddons() async {
     final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
     final data = res.data as Map?;
     if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
     if (data?['sso'] != true) throw '${data?['reason'] ?? 'Panel login failed'}';
     final c = (data!['catalogue'] as Map?) ?? const {};
+    final shortest = <String, ({String spec, String label, int months, double price})>{};
+    for (final p in (c['vpsAddons'] as List? ?? const [])) {
+      final a = (spec: '${p['spec']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 1, price: (p['price'] as num?)?.toDouble() ?? 0);
+      final cur = shortest[a.spec];
+      if (cur == null || a.months < cur.months) shortest[a.spec] = a;
+    }
     return [
-      for (final p in (c['vpsAddons'] as List? ?? const []))
-        (spec: '${p['spec']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 1, price: (p['price'] as num?)?.toDouble() ?? 0),
+      for (final a in shortest.values) (spec: a.spec, label: a.label, costPerMonth: (a.price / (a.months < 1 ? 1 : a.months) * 100).round() / 100),
     ];
   }
 
@@ -434,33 +455,33 @@ class VpsCartRepository {
     return [
       for (final i in items)
         () {
-          final p = prices.where((x) => x.vpsType == i.vpsType && x.months == i.months).firstOrNull;
+          final p = prices.where((x) => x.vpsType == i.vpsType).firstOrNull;
           final addons = [
             for (final a in i.addonSpecs)
               () {
-                final ap = addonPrices.where((x) => x.spec == a.spec && x.months == a.months).firstOrNull;
-                return ap == null ? null : VpsAddonChoice(spec: ap.spec, label: ap.label, months: ap.months, price: ap.price);
+                final ap = addonPrices.where((x) => x.spec == a.spec).firstOrNull;
+                return ap == null ? null : VpsAddonChoice(spec: ap.spec, label: ap.label, months: i.months, price: ap.totalForMonths(i.months));
               }(),
           ].whereType<VpsAddonChoice>().toList();
           return VpsCartItem(
             id: i.id, vpsType: i.vpsType, planName: p?.planName ?? i.planName, months: i.months, osLabel: i.osLabel, location: i.location,
-            serverName: i.serverName, price: p?.price ?? i.price, currency: p?.currency ?? i.currency, addons: addons, addonSpecs: i.addonSpecs,
+            serverName: i.serverName, price: p?.totalForMonths(i.months) ?? i.price, currency: p?.currency ?? i.currency, addons: addons, addonSpecs: i.addonSpecs,
           );
         }(),
     ];
   }
 
-  Future<void> add({required String serverName, required VpsPrice plan, required VpsOs os, required String location, List<VpsAddonPrice> addons = const []}) async {
+  Future<void> add({required String serverName, required VpsPrice plan, required int months, required VpsOs os, required String location, List<VpsAddonPrice> addons = const []}) async {
     await sb.from('vps_cart_items').upsert({
       'server_name': serverName,
       'vps_type': plan.vpsType,
       'plan_name': plan.planName,
-      'months': plan.months,
+      'months': months,
       'os_code': os.code,
       'os_label': os.label,
       'location': location,
-      'addons': [for (final a in addons) {'spec': a.spec, 'months': a.months}],
-      'price': plan.price,
+      'addons': [for (final a in addons) {'spec': a.spec, 'months': months}], // add-ons run for the server's whole term
+      'price': plan.totalForMonths(months),
       'currency': plan.currency,
     }, onConflict: 'user_id,server_name');
     await CartState.instance.refresh();

@@ -486,7 +486,7 @@ class _VpsCartState extends State<_VpsCart> {
     }
   }
 
-  String _months(int m) => '$m ${m == 1 ? 'month' : 'months'}';
+  String _months(int m) => termLabel(m);
 
   @override
   Widget build(BuildContext context) {

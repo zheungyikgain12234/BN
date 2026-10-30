@@ -446,42 +446,40 @@ grant execute on function public.assign_domain(uuid, uuid, numeric) to authentic
 
 -- 5b. VPS -------------------------------------------------------------------------------------------------------
 -- Same idea as domains: Master Data > VPS prices (admin only). The plan, its billing period and 20i's cost for the WHOLE
--- period are picked from the 20i shop, never typed. Selling price = cost x (1 + profit %), rounded to the cent. Always SGD.
+-- month are picked from the 20i shop, never typed. Selling price per month = cost x (1 + profit %), rounded to the cent. Always SGD.
+-- Like domains, the term is not set here: the reseller admin enters years + months (up to 10 years = 120 months) when adding a
+-- server to the basket (total = price per month x months). Add-ons are priced per month too and run for the same term.
 -- Nothing is seeded: add plans, add-ons, operating systems and locations in Master Data.
 create table public.vps_plan_prices (
   id uuid primary key default gen_random_uuid(),
   plan_name text not null,                    -- from 20i, e.g. 1 Core Unmanaged VPS
   vps_type text not null,                     -- 20i VPS type, e.g. vps-a (shop product code vps:a)
-  months int not null check (months > 0),
-  cost numeric(12,2) not null check (cost >= 0),    -- what 20i charges for the whole period (copied from the 20i shop)
+  cost_per_month numeric(12,2) not null check (cost_per_month >= 0),   -- what 20i charges per month (copied from the 20i shop)
   profit_percent numeric(6,2) not null check (profit_percent >= 0),
   cpu_cores int,                              -- specs copied from 20i when the plan is picked (null = not known)
   ram_mb int,
   disk_gb int,
-  unique (vps_type, months)
+  unique (vps_type)
 );
--- Already created the table? Run: alter table public.vps_plan_prices add column if not exists cpu_cores int, add column if not exists ram_mb int, add column if not exists disk_gb int;
--- then re-run the vps_prices view below (drop view public.vps_prices first).
 
 -- cPanel licence, snapshot backup and extra disks; ordered from 20i right after the server is created (addVpsAddon).
 create table public.vps_addon_prices (
   id uuid primary key default gen_random_uuid(),
   label text not null,                        -- from 20i, e.g. cPanel Pro (Max 30 Sites)
   product_spec text not null,                 -- 20i productSpec: vps_addon-cpanelpro | vps_addon-backup | vps_addon-disk100GB ...
-  months int not null check (months > 0),     -- billing period; the add-on renews separately from the server
-  cost numeric(12,2) not null check (cost >= 0),
+  cost_per_month numeric(12,2) not null check (cost_per_month >= 0),   -- what 20i charges per month; ordered for the server's whole term
   profit_percent numeric(6,2) not null check (profit_percent >= 0),
-  unique (product_spec, months)
+  unique (product_spec)
 );
 
 -- What the app and vps-checkout read: the tables plus the computed selling price.
 create view public.vps_prices with (security_invoker = true) as
-select p.id, p.plan_name, p.vps_type, p.months, p.cost, p.profit_percent, p.cpu_cores, p.ram_mb, p.disk_gb,
-       round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency
+select p.id, p.plan_name, p.vps_type, p.cost_per_month, p.profit_percent, p.cpu_cores, p.ram_mb, p.disk_gb,
+       round(p.cost_per_month * (1 + p.profit_percent / 100), 2) as price_per_month, 'SGD'::text as currency
 from public.vps_plan_prices p;
 create view public.vps_addons_priced with (security_invoker = true) as
-select a.id, a.label, a.product_spec, a.months, a.cost, a.profit_percent,
-       round(a.cost * (1 + a.profit_percent / 100), 2) as price, 'SGD'::text as currency
+select a.id, a.label, a.product_spec, a.cost_per_month, a.profit_percent,
+       round(a.cost_per_month * (1 + a.profit_percent / 100), 2) as price_per_month, 'SGD'::text as currency
 from public.vps_addon_prices a;
 grant select on public.vps_prices, public.vps_addons_priced to authenticated, service_role;
 

@@ -50,24 +50,28 @@ Deno.serve(async (req) => {
     if (cartErr) throw cartErr;
     if (!basket?.length) return json({ error: "Your VPS basket is empty" }, 400);
 
-    const { data: prices, error: priceErr } = await admin.from("vps_prices").select("vps_type, plan_name, months, price, currency");
+    const { data: prices, error: priceErr } = await admin.from("vps_prices").select("vps_type, plan_name, price_per_month, currency");
     if (priceErr) throw priceErr;
     // Add-ons (cPanel, backup, disks) are re-priced from vps_addons_priced too; the basket only remembers which ones.
-    const { data: addonPrices, error: addonErr } = await admin.from("vps_addons_priced").select("label, product_spec, months, price, currency");
+    const { data: addonPrices, error: addonErr } = await admin.from("vps_addons_priced").select("label, product_spec, price_per_month, currency");
     if (addonErr) throw addonErr;
     type Addon = { spec: string; label: string; months: number; price: number };
     const cart: { vps_type: string; plan_name: string; months: number; os_code: string; os_label: string; location: string; server_name: string; price: number; currency: string; addons: Addon[] }[] = [];
     for (const b of basket) {
-      const p = prices?.find((x) => x.vps_type === b.vps_type && x.months === b.months);
-      if (!p) return json({ error: `No price is set for the plan on ${b.server_name} (${b.months} months). Remove it from the basket.` }, 400);
+      const p = prices?.find((x) => x.vps_type === b.vps_type);
+      if (!p) return json({ error: `No price is set for the plan on ${b.server_name}. Remove it from the basket.` }, 400);
+      // The term is 1 to 120 months (10 years, like domains); every price is Master Data's price per month x the term's months.
+      if (!Number.isInteger(b.months) || b.months < 1 || b.months > 120) return json({ error: `${b.server_name}: the term must be 1 to 120 months (10 years)` }, 400);
+      const price = Math.round(Number(p.price_per_month) * b.months * 100) / 100;
       const addons: Addon[] = [];
-      for (const a of (b.addons ?? []) as { spec: string; months: number }[]) {
-        const ap = addonPrices?.find((x) => x.product_spec === a.spec && x.months === a.months);
+      for (const a of (b.addons ?? []) as { spec: string }[]) {
+        const ap = addonPrices?.find((x) => x.product_spec === a.spec);
         if (!ap) return json({ error: `No price is set for an add-on (${a.spec}) on ${b.server_name}. Remove the server from the basket and add it again.` }, 400);
         if (ap.currency !== p.currency) return json({ error: `Add-on ${ap.label} is priced in ${ap.currency}, but the server is in ${p.currency}` }, 400);
-        addons.push({ spec: a.spec, label: ap.label, months: a.months, price: Number(ap.price) });
+        // Add-ons run for the server's whole term.
+        addons.push({ spec: a.spec, label: ap.label, months: b.months, price: Math.round(Number(ap.price_per_month) * b.months * 100) / 100 });
       }
-      cart.push({ ...b, plan_name: p.plan_name, price: Number(p.price), currency: p.currency, addons });
+      cart.push({ ...b, plan_name: p.plan_name, price, currency: p.currency, addons });
     }
     const currency = cart[0].currency;
     if (cart.some((i) => i.currency !== currency)) return json({ error: "Basket mixes currencies; pay for them separately" }, 400);
@@ -93,7 +97,10 @@ Deno.serve(async (req) => {
       "metadata[kind]": "vps",
     });
     if (!user.email) form.delete("customer_email");
-    const months = (m: number) => `${m} ${m === 1 ? "month" : "months"}`;
+    const months = (m: number) => {
+      const y = Math.floor(m / 12), r = m % 12;
+      return [y ? `${y} ${y === 1 ? "year" : "years"}` : "", r ? `${r} ${r === 1 ? "month" : "months"}` : ""].filter(Boolean).join(" ");
+    };
     // One Stripe line per server, plus one per add-on.
     const lines = cart.flatMap((i) => [
       { name: `${i.plan_name} "${i.server_name}" (${months(i.months)})`, price: i.price },

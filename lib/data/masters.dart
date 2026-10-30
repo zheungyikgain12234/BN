@@ -104,11 +104,10 @@ const masterDefs = <MasterDef>[
     valueKey: 'id',
     fields: [
       MasterField('plan_name', 'Plan', readOnly: true),
-      MasterField('vps_type', 'Plan from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan and period'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
-      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('vps_type', 'Plan from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select a plan'),
+      MasterField('cost_per_month', 'Cost per month (20i)', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
-      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('price_per_month', 'Selling price per month', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
@@ -138,11 +137,10 @@ const masterDefs = <MasterDef>[
     valueKey: 'id',
     fields: [
       MasterField('label', 'Add-on', readOnly: true),
-      MasterField('product_spec', 'Add-on from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select an add-on and period'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
-      MasterField('cost', 'Cost per period (20i)', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('product_spec', 'Add-on from 20i', kind: MasterFieldKind.panel, required: true, hint: 'Select an add-on'),
+      MasterField('cost_per_month', 'Cost per month (20i)', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
-      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('price_per_month', 'Selling price per month', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(
@@ -205,14 +203,15 @@ class MasterRepository {
   /// Returns how many changed.
   Future<int> refreshCosts(MasterDef def, List<Map<String, dynamic>> rows) async {
     final domains = def.table == 'domain_tld_prices';
-    final costCol = domains ? 'cost_per_year' : 'cost';
+    final perMonth = def.table == 'vps_plan_prices' || def.table == 'vps_addon_prices';
+    final costCol = domains ? 'cost_per_year' : (perMonth ? 'cost_per_month' : 'cost');
     final Map<String, double> fresh;
     String keyOf(Map<String, dynamic> r) => switch (def.table) {
           'domain_tld_prices' => '${r['tld']}',
-          'vps_plan_prices' => '${r['vps_type']}|${r['months']}',
+          'vps_plan_prices' => '${r['vps_type']}',
           'hosting_plan_prices' => '${r['package_type_id']}|${r['months']}',
           'ssl_plan_prices' => '${r['class_code']}|${r['months']}',
-          _ => '${r['product_spec']}|${r['months']}',
+          _ => '${r['product_spec']}',
         };
     if (domains) {
       fresh = {for (final t in await domainCartRepo.tldsFrom20i()) t.tld: t.cost};
@@ -221,9 +220,9 @@ class MasterRepository {
     } else if (def.table == 'ssl_plan_prices') {
       fresh = {for (final p in await sslCartRepo.panelCatalogue()) '${p.code}|${p.months}': p.price};
     } else if (def.table == 'vps_plan_prices') {
-      fresh = {for (final p in (await vpsCartRepo.panelCatalogue()).plans) '${p.code.replaceFirst('vps:', 'vps-')}|${p.months}': p.price};
+      fresh = {for (final p in vpsPlansPerMonth((await vpsCartRepo.panelCatalogue()).plans)) p.code.replaceFirst('vps:', 'vps-'): p.costPerMonth};
     } else {
-      fresh = {for (final a in await vpsCartRepo.panelAddons()) '${a.spec}|${a.months}': a.price};
+      fresh = {for (final a in await vpsCartRepo.panelAddons()) a.spec: a.costPerMonth};
     }
     var changed = 0;
     for (final r in rows) {

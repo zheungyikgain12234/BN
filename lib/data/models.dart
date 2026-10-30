@@ -322,38 +322,53 @@ class HostingOrderItem {
       );
 }
 
-/// What the reseller charges for one VPS plan over one billing period (Master Data > VPS prices).
+/// Longest VPS term the shop offers, in years (same limit as domains), and the same in months.
+const maxVpsYears = 10;
+const maxVpsMonths = maxVpsYears * 12;
+
+/// "1 year 6 months", "10 years", "3 months".
+String termLabel(int months) {
+  final y = months ~/ 12, m = months % 12;
+  return [if (y > 0) '$y ${y == 1 ? 'year' : 'years'}', if (m > 0) '$m ${m == 1 ? 'month' : 'months'}'].join(' ');
+}
+
+/// What the reseller charges per month for one VPS plan (Master Data > VPS prices). The reseller admin enters the term (years
+/// and months, up to [maxVpsYears] years) when adding it to the basket, like domains.
 class VpsPrice {
-  const VpsPrice({required this.vpsType, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0, this.cores, this.ramMb, this.diskGb});
+  const VpsPrice({required this.vpsType, required this.planName, required this.pricePerMonth, required this.currency, this.costPerMonth = 0, this.cores, this.ramMb, this.diskGb});
   final String vpsType, planName, currency;
-  final int months;
-  final double price;
+  final double pricePerMonth;
+
+  /// What 20i charges per month (the selling [pricePerMonth] is this plus the profit %).
+  final double costPerMonth;
+
+  /// Selling price for a term of [months] months.
+  double totalForMonths(int months) => (pricePerMonth * months * 100).round() / 100;
+
+  /// 20i's cost for a term of [months] months (what the panel basket holds).
+  double costForMonths(int months) => (costPerMonth * months * 100).round() / 100;
 
   /// Specs copied from 20i when the plan was picked in Master Data; null when unknown.
   final int? cores, ramMb, diskGb;
 
-  /// What 20i charges for the whole period (the selling [price] is this plus the profit %).
-  final double cost;
-
-  String get label => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
-
-  /// e.g. "1 GB memory · 1 core · 25 GB SSD"; only the parts 20i gave us, empty when none are known.
-  String get specs {
+  /// e.g. ["1 GB memory", "1 core", "25 GB SSD"]; only the parts 20i gave us, empty when none are known.
+  List<String> get specLines {
     String gb(num v) => v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(1);
     return [
       if (ramMb != null) '${gb(ramMb! / 1024)} GB memory',
       if (cores != null) '$cores ${cores == 1 ? 'core' : 'cores'}',
       if (diskGb != null) '$diskGb GB SSD',
-    ].join(' · ');
+    ];
   }
+
+  String get specs => specLines.join(' · ');
 
   factory VpsPrice.fromJson(Map<String, dynamic> j) => VpsPrice(
         vpsType: j['vps_type'] as String,
         planName: j['plan_name'] as String,
-        months: j['months'] as int,
-        price: (j['price'] as num).toDouble(),
+        pricePerMonth: (j['price_per_month'] as num).toDouble(),
         currency: kCurrency,
-        cost: (j['cost'] as num?)?.toDouble() ?? 0,
+        costPerMonth: (j['cost_per_month'] as num?)?.toDouble() ?? 0,
         cores: j['cpu_cores'] as int?,
         ramMb: j['ram_mb'] as int?,
         diskGb: j['disk_gb'] as int?,
@@ -371,13 +386,16 @@ class VpsOs {
 /// What the reseller charges for one VPS add-on over one billing period (Master Data > VPS add-on prices).
 /// [spec] is the 20i productSpec, e.g. vps_addon-cpanelpro, vps_addon-backup or vps_addon-disk100GB.
 class VpsAddonPrice {
-  const VpsAddonPrice({required this.label, required this.spec, required this.months, required this.price, required this.currency, this.cost = 0});
+  const VpsAddonPrice({required this.label, required this.spec, required this.pricePerMonth, required this.currency, this.costPerMonth = 0});
   final String label, spec, currency;
-  final int months;
-  final double price;
+  final double pricePerMonth;
 
-  /// What 20i charges for the whole period.
-  final double cost;
+  /// What 20i charges per month.
+  final double costPerMonth;
+
+  /// An add-on runs for the server's whole term, so it is priced for the same number of months.
+  double totalForMonths(int months) => (pricePerMonth * months * 100).round() / 100;
+  double costForMonths(int months) => (costPerMonth * months * 100).round() / 100;
 
   bool get isCpanel => spec.startsWith('vps_addon-cpanel');
   bool get isBackup => spec == 'vps_addon-backup';
@@ -386,15 +404,12 @@ class VpsAddonPrice {
   /// Disk size in GB (0 when this is not a disk), to sort the disk list.
   int get diskGb => int.tryParse(RegExp(r'\d+').firstMatch(spec)?.group(0) ?? '') ?? 0;
 
-  String get periodLabel => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
-
   factory VpsAddonPrice.fromJson(Map<String, dynamic> j) => VpsAddonPrice(
         label: j['label'] as String,
         spec: j['product_spec'] as String,
-        months: j['months'] as int,
-        price: (j['price'] as num).toDouble(),
+        pricePerMonth: (j['price_per_month'] as num).toDouble(),
         currency: kCurrency,
-        cost: (j['cost'] as num?)?.toDouble() ?? 0,
+        costPerMonth: (j['cost_per_month'] as num?)?.toDouble() ?? 0,
       );
 }
 
