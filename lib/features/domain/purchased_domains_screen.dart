@@ -64,24 +64,13 @@ class _PurchasedDomainsScreenState extends State<PurchasedDomainsScreen> {
     }
   }
 
-  Widget _stat(String label, int value, IconData icon, Color color) => Expanded(
-        child: AppCard(
-          child: Row(children: [
-            Icon(icon, color: color),
-            const SizedBox(width: 12),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('$value', style: T.headlineLg),
-              Text(label, style: T.labelSm.copyWith(color: C.secondary)),
-            ]),
-          ]),
-        ),
-      );
-
   @override
   Widget build(BuildContext context) {
     final all = _domains;
     final canAssign = AppState.instance.canManageCatalog;
     final assigned = all?.where((d) => d.assigned).length ?? 0;
+    final withProfit = all?.where((d) => d.profit != null).toList() ?? const <PurchasedDomain>[];
+    final totalProfit = withProfit.fold<double>(0, (sum, d) => sum + d.profit!);
     final rows = all == null
         ? const <PurchasedDomain>[]
         : switch (_filter) {
@@ -93,16 +82,67 @@ class _PurchasedDomainsScreenState extends State<PurchasedDomainsScreen> {
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text('Purchased domains', style: T.headlineLg),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         if (all != null)
           Row(children: [
-            _stat('Total domains', all.length, Icons.language, C.primary),
+            Expanded(
+              child: _Entrance(
+                index: 0,
+                child: _StatCard(
+                  label: 'Total domains',
+                  value: all.length,
+                  icon: Icons.language,
+                  color: C.primary,
+                  selected: _filter == _Filter.all,
+                  onTap: () => setState(() => _filter = _Filter.all),
+                ),
+              ),
+            ),
             const SizedBox(width: 12),
-            _stat('Assigned', assigned, Icons.assignment_turned_in_outlined, C.tertiary),
+            Expanded(
+              child: _Entrance(
+                index: 1,
+                child: _StatCard(
+                  label: 'Assigned',
+                  value: assigned,
+                  icon: Icons.assignment_turned_in_outlined,
+                  color: C.tertiary,
+                  selected: _filter == _Filter.assigned,
+                  onTap: () => setState(() => _filter = _Filter.assigned),
+                ),
+              ),
+            ),
             const SizedBox(width: 12),
-            _stat('Not yet assigned', all.length - assigned, Icons.pending_actions_outlined, C.amber),
+            Expanded(
+              child: _Entrance(
+                index: 2,
+                child: _StatCard(
+                  label: 'Not yet assigned',
+                  value: all.length - assigned,
+                  icon: Icons.pending_actions_outlined,
+                  color: const Color(0xFFB87503),
+                  selected: _filter == _Filter.unassigned,
+                  onTap: () => setState(() => _filter = _Filter.unassigned),
+                ),
+              ),
+            ),
+            if (withProfit.isNotEmpty) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: _Entrance(
+                  index: 3,
+                  child: _StatCard(
+                    label: 'Total profit',
+                    amount: totalProfit,
+                    currency: withProfit.first.currency,
+                    icon: Icons.trending_up,
+                    color: totalProfit >= 0 ? C.tertiary : C.error,
+                  ),
+                ),
+              ),
+            ],
           ]),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Expanded(
           child: _error != null
               ? ErrorRetry(error: _error!, onRetry: _load)
@@ -129,10 +169,16 @@ class _PurchasedDomainsScreenState extends State<PurchasedDomainsScreen> {
                         TableCol(
                           label: 'Domain',
                           sortValue: (d) => d.domain.toLowerCase(),
-                          cell: (d) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(d.domain, style: T.labelLg),
-                            if (d.failed) Text(d.note ?? 'Registration failed', style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
-                            if (d.status == 'test_registered') Text('Sandbox: not registered at 20i', style: T.bodySm.copyWith(color: C.secondary)),
+                          cell: (d) => Row(mainAxisSize: MainAxisSize.min, children: [
+                            _DomainAvatar(failed: d.failed, assigned: d.assigned),
+                            const SizedBox(width: 12),
+                            Flexible(
+                              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(d.domain, style: T.labelLg, overflow: TextOverflow.ellipsis),
+                                if (d.failed) Text(d.note ?? 'Registration failed', style: T.bodySm.copyWith(color: C.error), overflow: TextOverflow.ellipsis),
+                                if (d.status == 'test_registered') Text('Sandbox: not registered at 20i', style: T.bodySm.copyWith(color: C.secondary)),
+                              ]),
+                            ),
                           ]),
                         ),
                         TableCol(label: 'Years', numeric: true, sortValue: (d) => d.years, cell: (d) => Text('${d.years}')),
@@ -141,14 +187,22 @@ class _PurchasedDomainsScreenState extends State<PurchasedDomainsScreen> {
                         TableCol(
                           label: 'Client',
                           sortValue: (d) => d.clientName.toLowerCase(),
-                          cell: (d) => d.assigned ? Text(d.clientName.isEmpty ? '—' : d.clientName) : const Pill('Unassigned', bg: Color(0xFFFDEFC8), fg: Color(0xFF7A5200)),
+                          cell: (d) => d.assigned
+                              ? Text(d.clientName.isEmpty ? '—' : d.clientName, style: T.labelLg)
+                              : const Pill('Unassigned', icon: Icons.schedule, bg: Color(0xFFFDEFC8), fg: Color(0xFF7A5200)),
                         ),
                         TableCol(label: 'Sold at', numeric: true, sortValue: (d) => d.sellPrice ?? -1, cell: (d) => Text(d.sellPrice == null ? '—' : money(d.sellPrice!, d.currency))),
                         TableCol(
                           label: 'Profit',
                           numeric: true,
                           sortValue: (d) => d.profit ?? -1e12,
-                          cell: (d) => Text(d.profit == null ? '—' : money(d.profit!, d.currency), style: T.labelLg.copyWith(color: (d.profit ?? 0) >= 0 ? C.tertiary : C.error)),
+                          cell: (d) => d.profit == null
+                              ? Text('—', style: T.bodyMd.copyWith(color: C.outline))
+                              : Pill(
+                                  '${d.profit! >= 0 ? '+' : ''}${money(d.profit!, d.currency)}',
+                                  bg: d.profit! >= 0 ? C.tertiaryFixed.withValues(alpha: 0.6) : C.errorContainer,
+                                  fg: d.profit! >= 0 ? C.onTertiaryFixedVariant : C.error,
+                                ),
                         ),
                       ],
                       actions: canAssign
@@ -165,6 +219,123 @@ class _PurchasedDomainsScreenState extends State<PurchasedDomainsScreen> {
                     ),
         ),
       ]),
+    );
+  }
+}
+
+/// Strong ease-out: starts fast so the UI feels responsive, settles gently.
+const _easeOut = Cubic(0.23, 1, 0.32, 1);
+
+/// Fades and lifts its child in once, staggered by [index]. Short (under 300ms) so it never feels slow.
+class _Entrance extends StatelessWidget {
+  const _Entrance({required this.index, required this.child});
+  final int index;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: Duration(milliseconds: 200 + index * 60),
+        curve: _easeOut,
+        builder: (_, v, child) => Opacity(opacity: v, child: Transform.translate(offset: Offset(0, 8 * (1 - v)), child: child)),
+        child: child,
+      );
+}
+
+/// Summary tile. Pass [value] for a count (tap to filter when [onTap] is set) or [amount] for money.
+class _StatCard extends StatefulWidget {
+  const _StatCard({required this.label, required this.icon, required this.color, this.value, this.amount, this.currency = '', this.selected = false, this.onTap});
+  final String label, currency;
+  final IconData icon;
+  final Color color;
+  final int? value;
+  final double? amount;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  State<_StatCard> createState() => _StatCardState();
+}
+
+class _StatCardState extends State<_StatCard> {
+  bool _hover = false, _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.color;
+    final tappable = widget.onTap != null;
+    final number = widget.value != null
+        ? TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: widget.value!.toDouble()),
+            duration: const Duration(milliseconds: 450),
+            curve: _easeOut,
+            builder: (_, v, _) => Text('${v.round()}', style: T.headlineLg),
+          )
+        : TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: widget.amount ?? 0),
+            duration: const Duration(milliseconds: 450),
+            curve: _easeOut,
+            builder: (_, v, _) => Text(money(v, widget.currency), style: T.headlineLg.copyWith(color: c), overflow: TextOverflow.ellipsis),
+          );
+    return MouseRegion(
+      cursor: tappable ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onTapDown: tappable ? (_) => setState(() => _pressed = true) : null,
+        onTapUp: tappable ? (_) => setState(() => _pressed = false) : null,
+        onTapCancel: tappable ? () => setState(() => _pressed = false) : null,
+        child: AnimatedScale(
+          scale: _pressed ? 0.97 : 1,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.all(16),
+            transform: Matrix4.translationValues(0, tappable && _hover && !_pressed ? -2 : 0, 0),
+            decoration: BoxDecoration(
+              color: C.surfaceLowest,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: widget.selected ? c.withValues(alpha: 0.7) : C.outlineVariant.withValues(alpha: 0.6), width: widget.selected ? 1.5 : 1),
+              boxShadow: [BoxShadow(color: Color(_hover && tappable ? 0x1F000000 : 0x14000000), blurRadius: _hover && tappable ? 14 : 8, offset: const Offset(0, 2))],
+            ),
+            child: Row(children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(color: c.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+                child: Icon(widget.icon, color: c, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  number,
+                  Text(widget.label, style: T.labelSm.copyWith(color: C.secondary), overflow: TextOverflow.ellipsis),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small rounded tile before each domain name; colour shows its state (failed / assigned / waiting).
+class _DomainAvatar extends StatelessWidget {
+  const _DomainAvatar({required this.failed, required this.assigned});
+  final bool failed, assigned;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = failed ? C.error : (assigned ? C.tertiary : const Color(0xFFB87503));
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(9)),
+      child: Icon(failed ? Icons.error_outline : Icons.language, color: color, size: 18),
     );
   }
 }

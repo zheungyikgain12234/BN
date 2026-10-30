@@ -242,13 +242,30 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       ? list.map((x: any) => ({ months: Number(x.periodMonths ?? fallbackMonths), price: Number(x.price) }))
       : [{ months: fallbackMonths, price: 0 }];
   };
-  const plans = (Array.isArray(products) ? products : [])
-    .filter((p: any) => typeof p?.code === "string" && /^vps:[a-z0-9]+$/i.test(p.code) && !p.discontinued)
+  const vpsProducts = (Array.isArray(products) ? products : [])
+    .filter((p: any) => typeof p?.code === "string" && /^vps:[a-z0-9]+$/i.test(p.code) && !p.discontinued);
+  // Memory / cores / disk are not in the product list; the order page reads them per plan from provisioningInfo
+  // ({CpuCores, RamMb, OsDiskSizeGb, DataDiskSizeGb}). A plan whose call fails is still offered, just without specs.
+  const specs = new Map<string, { cores: number | null; ramMb: number | null; diskGb: number | null }>();
+  await Promise.all(vpsProducts.map(async (p: any) => {
+    try {
+      const i = await get(`/n/catalogue/product/${p.code}/provisioningInfo`);
+      const num = (v: any) => (Number.isFinite(Number(v)) && v !== null ? Number(v) : null);
+      const disk = (num(i?.OsDiskSizeGb) ?? 0) + (num(i?.DataDiskSizeGb) ?? 0);
+      specs.set(String(p.code), { cores: num(i?.CpuCores), ramMb: num(i?.RamMb), diskGb: disk > 0 ? disk : null });
+    } catch (e) {
+      console.log("stackcp-sso provisioningInfo failed", p.code, String(e).slice(0, 200));
+    }
+  }));
+  const plans = vpsProducts
     .flatMap((p: any) => periods(p, 1).map((x) => ({
       code: String(p.code),                                        // vps:a
       label: String(p.label ?? p.code),                            // 1 Core Unmanaged VPS
       months: x.months,
       price: x.price,                                              // 20i's cost for the whole period
+      cores: specs.get(String(p.code))?.cores ?? null,
+      ramMb: specs.get(String(p.code))?.ramMb ?? null,
+      diskGb: specs.get(String(p.code))?.diskGb ?? null,
     })));
 
   // SSL certificates live in the same catalogue as tls_certificate:<class-code> (e.g. tls_certificate:tucows-rapidssl).

@@ -355,7 +355,7 @@ class VpsCartRepository {
 
   /// The panel shop's VPS plans and operating systems, read through the stackcp-sso login (for the Master Data pickers).
   /// The plan price is the shop's own price: a hint only, the reseller price is set in Master Data.
-  Future<({List<({String code, String label, int months, double price})> plans, List<({String code, String label, bool paid})> os})> panelCatalogue() async {
+  Future<({List<({String code, String label, int months, double price, int? cores, int? ramMb, int? diskGb})> plans, List<({String code, String label, bool paid})> os})> panelCatalogue() async {
     final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
     final data = res.data as Map?;
     if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
@@ -364,7 +364,15 @@ class VpsCartRepository {
     return (
       plans: [
         for (final p in (c['vpsPlans'] as List? ?? const []))
-          (code: '${p['code']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 1, price: (p['price'] as num?)?.toDouble() ?? 0),
+          (
+            code: '${p['code']}',
+            label: '${p['label']}',
+            months: (p['months'] as num?)?.toInt() ?? 1,
+            price: (p['price'] as num?)?.toDouble() ?? 0,
+            cores: (p['cores'] as num?)?.toInt(),
+            ramMb: (p['ramMb'] as num?)?.toInt(),
+            diskGb: (p['diskGb'] as num?)?.toInt(),
+          ),
       ],
       os: [
         for (final o in (c['vpsOs'] as List? ?? const [])) (code: '${o['code']}', label: '${o['label']}', paid: o['paid'] == true),

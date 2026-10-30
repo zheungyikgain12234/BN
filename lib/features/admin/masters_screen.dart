@@ -213,6 +213,7 @@ class _MasterDialogState extends State<_MasterDialog> {
 
   /// Domain prices: 20i's yearly cost for the extension picked (the cost column is never typed).
   double? _cost;
+  ({int? cores, int? ramMb, int? diskGb})? _specs; // VPS plan specs from 20i, set when a plan is picked
 
   /// Domain prices: choose the extension from 20i's own list, with a search box.
   Future<void> _pickTld() async {
@@ -341,9 +342,9 @@ class _MasterDialogState extends State<_MasterDialog> {
       if (!mounted) return;
       final isPlan = widget.def.table == 'vps_plan_prices';
       final options = isPlan
-          ? [for (final p in cat.plans) (code: p.code, label: p.label, hint: '${p.months} ${p.months == 1 ? 'month' : 'months'} · cost ${money(p.price)}', months: p.months, cost: p.price)]
-          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', months: 0, cost: 0.0)];
-      final chosen = await showDialog<({String code, String label, String hint, int months, double cost})>(
+          ? [for (final p in cat.plans) (code: p.code, label: p.label, hint: '${p.months} ${p.months == 1 ? 'month' : 'months'} · cost ${money(p.price)}', months: p.months, cost: p.price, cores: p.cores, ramMb: p.ramMb, diskGb: p.diskGb)]
+          : [for (final o in cat.os) (code: o.code, label: o.label, hint: o.paid ? 'paid' : 'free', months: 0, cost: 0.0, cores: null as int?, ramMb: null as int?, diskGb: null as int?)];
+      final chosen = await showDialog<({String code, String label, String hint, int months, double cost, int? cores, int? ramMb, int? diskGb})>(
         context: context,
         builder: (ctx) => SimpleDialog(
           title: Text(isPlan ? 'VPS plans from 20i (cost per period)' : 'Operating systems from 20i'),
@@ -361,6 +362,7 @@ class _MasterDialogState extends State<_MasterDialog> {
           _text['plan_name']!.text = chosen.label;
           _text['months']!.text = '${chosen.months}';
           _cost = chosen.cost;
+          _specs = (cores: chosen.cores, ramMb: chosen.ramMb, diskGb: chosen.diskGb);
         });
       } else {
         _text['code']!.text = chosen.code;
@@ -432,6 +434,11 @@ class _MasterDialogState extends State<_MasterDialog> {
             final t = _text[f.key]!.text.trim();
             values[f.key] = t.isEmpty ? null : t;
         }
+      }
+      if (widget.def.table == 'vps_plan_prices' && _specs != null) {
+        values['cpu_cores'] = _specs!.cores;
+        values['ram_mb'] = _specs!.ramMb;
+        values['disk_gb'] = _specs!.diskGb;
       }
       await masterRepo.save(widget.def, values, id: widget.row?['id'] as String?);
       if (mounted) Navigator.pop(context, true);

@@ -455,8 +455,13 @@ create table public.vps_plan_prices (
   months int not null check (months > 0),
   cost numeric(12,2) not null check (cost >= 0),    -- what 20i charges for the whole period (copied from the 20i shop)
   profit_percent numeric(6,2) not null check (profit_percent >= 0),
+  cpu_cores int,                              -- specs copied from 20i when the plan is picked (null = not known)
+  ram_mb int,
+  disk_gb int,
   unique (vps_type, months)
 );
+-- Already created the table? Run: alter table public.vps_plan_prices add column if not exists cpu_cores int, add column if not exists ram_mb int, add column if not exists disk_gb int;
+-- then re-run the vps_prices view below (drop view public.vps_prices first).
 
 -- cPanel licence, snapshot backup and extra disks; ordered from 20i right after the server is created (addVpsAddon).
 create table public.vps_addon_prices (
@@ -471,7 +476,7 @@ create table public.vps_addon_prices (
 
 -- What the app and vps-checkout read: the tables plus the computed selling price.
 create view public.vps_prices with (security_invoker = true) as
-select p.id, p.plan_name, p.vps_type, p.months, p.cost, p.profit_percent,
+select p.id, p.plan_name, p.vps_type, p.months, p.cost, p.profit_percent, p.cpu_cores, p.ram_mb, p.disk_gb,
        round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency
 from public.vps_plan_prices p;
 create view public.vps_addons_priced with (security_invoker = true) as

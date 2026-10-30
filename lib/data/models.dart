@@ -324,15 +324,28 @@ class HostingOrderItem {
 
 /// What the reseller charges for one VPS plan over one billing period (Master Data > VPS prices).
 class VpsPrice {
-  const VpsPrice({required this.vpsType, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0});
+  const VpsPrice({required this.vpsType, required this.planName, required this.months, required this.price, required this.currency, this.cost = 0, this.cores, this.ramMb, this.diskGb});
   final String vpsType, planName, currency;
   final int months;
   final double price;
+
+  /// Specs copied from 20i when the plan was picked in Master Data; null when unknown.
+  final int? cores, ramMb, diskGb;
 
   /// What 20i charges for the whole period (the selling [price] is this plus the profit %).
   final double cost;
 
   String get label => '$months ${months == 1 ? 'month' : 'months'} for $currency ${price.toStringAsFixed(2)}';
+
+  /// e.g. "1 GB memory · 1 core · 25 GB SSD"; only the parts 20i gave us, empty when none are known.
+  String get specs {
+    String gb(num v) => v == v.roundToDouble() ? '${v.round()}' : v.toStringAsFixed(1);
+    return [
+      if (ramMb != null) '${gb(ramMb! / 1024)} GB memory',
+      if (cores != null) '$cores ${cores == 1 ? 'core' : 'cores'}',
+      if (diskGb != null) '$diskGb GB SSD',
+    ].join(' · ');
+  }
 
   factory VpsPrice.fromJson(Map<String, dynamic> j) => VpsPrice(
         vpsType: j['vps_type'] as String,
@@ -341,6 +354,9 @@ class VpsPrice {
         price: (j['price'] as num).toDouble(),
         currency: kCurrency,
         cost: (j['cost'] as num?)?.toDouble() ?? 0,
+        cores: j['cpu_cores'] as int?,
+        ramMb: j['ram_mb'] as int?,
+        diskGb: j['disk_gb'] as int?,
       );
 }
 

@@ -157,7 +157,12 @@ class _VpsScreenState extends State<VpsScreen> {
             child: Row(children: [
               const Icon(Icons.dns_outlined, color: C.primary, size: 22),
               const SizedBox(width: 10),
-              Expanded(child: Text(options.first.planName, style: T.headlineSm)),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(options.first.planName, style: T.headlineSm),
+                  if (options.first.specs.isNotEmpty) Text(options.first.specs, style: T.bodySm.copyWith(color: C.secondary)),
+                ]),
+              ),
             ]),
           ),
           SizedBox(
