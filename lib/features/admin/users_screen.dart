@@ -84,7 +84,7 @@ class _UsersScreenState extends State<UsersScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Manage Users', style: T.headlineLg),
+        Text(AppState.instance.isSuperAdmin ? 'Manage Users' : 'Manage Resellers', style: T.headlineLg),
         const SizedBox(height: 16),
         Expanded(
           child: _error != null

@@ -28,6 +28,9 @@ class MasterDef {
   final String? readFrom;
   final List<MasterField> fields;
 
+  /// Sidebar label and page heading, e.g. "Manage VPS".
+  String get menu => 'Manage $title';
+
   /// Column shown as the row's name (the first field).
   String get nameKey => fields.first.key;
 }
@@ -56,7 +59,7 @@ const masterDefs = <MasterDef>[
   ),
   MasterDef(
     table: 'pricing_models',
-    title: 'Pricing models',
+    title: 'Pricing Models',
     singular: 'pricing model',
     orderBy: 'name',
     usageKind: 'pricing_model',
@@ -68,7 +71,7 @@ const masterDefs = <MasterDef>[
   MasterDef(
     table: 'domain_tld_prices',
     readFrom: 'domain_prices',
-    title: 'Domain names',
+    title: 'Domain Names',
     singular: 'domain name',
     orderBy: 'tld',
     usageKind: '',
@@ -123,11 +126,11 @@ const masterDefs = <MasterDef>[
     valueKey: 'id',
     fields: [
       MasterField('plan_name', 'Certificate', readOnly: true),
-      MasterField('class_code', 'Certificate ID', kind: MasterFieldKind.panel, required: true, hint: 'Select a certificate and period'),
-      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true),
-      MasterField('cost', 'Market price per period', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('class_code', 'Certificate ID', kind: MasterFieldKind.panel, required: true, hint: 'Select a certificate'),
+      MasterField('months', 'Months', kind: MasterFieldKind.integer, readOnly: true, inTable: false),
+      MasterField('cost', 'Market price per year', kind: MasterFieldKind.money, readOnly: true),
       MasterField('profit_percent', 'Profit %', kind: MasterFieldKind.percent, required: true, hint: '10'),
-      MasterField('price', 'Selling price per period', kind: MasterFieldKind.money, readOnly: true),
+      MasterField('price', 'Selling price per year', kind: MasterFieldKind.money, readOnly: true),
     ],
   ),
   MasterDef(

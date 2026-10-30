@@ -7,6 +7,7 @@ import '../../core/config.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
+import '../../data/masters.dart';
 import '../../data/repository.dart';
 
 class _NavItem {
@@ -22,6 +23,11 @@ class _NavGroup {
   final List<_NavItem> items;
 }
 
+_NavItem _master(String table, IconData icon) {
+  final d = masterDefs.firstWhere((d) => d.table == table);
+  return _NavItem(d.menu, icon, Routes.adminMaster(table));
+}
+
 /// Sidebar groups for the signed-in user's role: everyone browses; company admins also manage software;
 /// super admins also manage companies and users.
 List<_NavGroup> _navFor(AppState s) => s.isSuperAdmin
@@ -29,8 +35,21 @@ List<_NavGroup> _navFor(AppState s) => s.isSuperAdmin
         const _NavGroup('Administration', [
           _NavItem('Manage Companies', Icons.business_outlined, Routes.adminCompanies),
           _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
-          _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
-          _NavItem('Master Data', Icons.tune, Routes.adminMasters),
+        ]),
+        _NavGroup('Software Solutions', [
+          _master('software_categories', Icons.category_outlined),
+          _master('software_tags', Icons.sell_outlined),
+          _master('pricing_models', Icons.payments_outlined),
+          const _NavItem('Manage Software', Icons.library_add_outlined, Routes.adminSoftware),
+        ]),
+        _NavGroup('Hosting Solution', [
+          _master('domain_tld_prices', Icons.language),
+          _master('hosting_plan_prices', Icons.cloud_outlined),
+          _master('ssl_plan_prices', Icons.lock_outline),
+          _master('vps_plan_prices', Icons.dns_outlined),
+          _master('vps_addon_prices', Icons.add_box_outlined),
+          _master('vps_locations', Icons.location_on_outlined),
+          _master('vps_os_options', Icons.computer_outlined),
         ]),
       ]
     : [
@@ -54,7 +73,7 @@ List<_NavGroup> _navFor(AppState s) => s.isSuperAdmin
       if (s.canManageCatalog)
         _NavGroup('Administration', [
           const _NavItem('Manage software', Icons.library_add_outlined, Routes.adminSoftware),
-          if (s.canManageUsers) const _NavItem('Manage Users', Icons.manage_accounts_outlined, Routes.adminUsers),
+          if (s.canManageUsers) const _NavItem('Manage Resellers', Icons.manage_accounts_outlined, Routes.adminUsers),
         ]),
     ];
 

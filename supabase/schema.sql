@@ -751,13 +751,15 @@ create table public.ssl_plan_prices (
   months int not null check (months > 0),
   cost numeric(12,2) not null check (cost >= 0),    -- what 20i charges for the whole period (copied from the 20i shop)
   profit_percent numeric(6,2) not null check (profit_percent >= 0),
+  features text[] not null default '{}',      -- what the certificate includes (e.g. $10,000 Warranty), copied from the 20i order page when it is picked
+  summary text not null default '',
   unique (class_code, months)
 );
 
 -- What the app and ssl-checkout read: the table plus the computed selling price.
 create view public.ssl_prices with (security_invoker = true) as
 select p.id, p.plan_name, p.class_code, p.months, p.cost, p.profit_percent,
-       round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency
+       round(p.cost * (1 + p.profit_percent / 100), 2) as price, 'SGD'::text as currency, p.features, p.summary
 from public.ssl_plan_prices p;
 grant select on public.ssl_prices to authenticated, service_role;
 

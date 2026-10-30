@@ -552,15 +552,23 @@ class SslCartRepository {
 
   /// The panel shop's SSL certificates (code = 20i class-code), read through the stackcp-sso login for the Master Data picker.
   /// The price is 20i's cost for the whole period; the selling price is that plus the profit % set in Master Data.
-  Future<List<({String code, String label, int months, double price})>> panelCatalogue() async {
+  Future<List<({String code, String label, int months, double price, List<String> features, String summary})>> panelCatalogue() async {
     final res = await sb.functions.invoke('stackcp-sso', body: {'catalogue': true});
     final data = res.data as Map?;
     if (data?['catalogueError'] != null) throw '${data!['catalogueError']}';
     if (data?['sso'] != true) throw '${data?['reason'] ?? 'Panel login failed'}';
     final c = (data!['catalogue'] as Map?) ?? const {};
+    final info = (c['sslInfo'] as Map?) ?? const {}; // what each type includes, read from the panel's order-ssl page
     return [
       for (final p in (c['sslPlans'] as List? ?? const []))
-        (code: '${p['code']}', label: '${p['label']}', months: (p['months'] as num?)?.toInt() ?? 12, price: (p['price'] as num?)?.toDouble() ?? 0),
+        (
+          code: '${p['code']}',
+          label: '${p['label']}',
+          months: (p['months'] as num?)?.toInt() ?? 12,
+          price: (p['price'] as num?)?.toDouble() ?? 0,
+          features: [for (final x in ((info['${p['code']}'] as Map?)?['features'] as List? ?? const [])) '$x'],
+          summary: '${(info['${p['code']}'] as Map?)?['summary'] ?? ''}',
+        ),
     ];
   }
 

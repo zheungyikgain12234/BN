@@ -63,6 +63,7 @@ class Routes {
   static const licenses = '/licenses';
   static const adminSoftware = '/admin/software';
   static const adminMasters = '/admin/masters';
+  static String adminMaster(String table) => '$adminMasters/$table';
   static const domainSearch = '/domain-search';
   static const purchasedDomains = '/purchased-domains';
   static const purchasedHosting = '/purchased-hosting';
@@ -75,7 +76,7 @@ class Routes {
 }
 
 /// Pages a super admin may open.
-const _superAdminRoutes = {Routes.adminCompanies, Routes.adminUsers, Routes.adminSoftware, Routes.adminMasters};
+const _superAdminRoutes = {Routes.adminCompanies, Routes.adminUsers, Routes.adminSoftware};
 
 final router = GoRouter(
   initialLocation: Env.offline ? Routes.domainSearch : Routes.login,
@@ -94,11 +95,11 @@ final router = GoRouter(
     final home = app.isSuperAdmin ? Routes.adminCompanies : Routes.domainSearch;
     if (onAuthScreen || loc == Routes.company || loc == Routes.mfa) return home;
     // A super admin only manages: no shopping, clients or licenses pages.
-    if (app.isSuperAdmin && !_superAdminRoutes.contains(loc)) return home;
+    if (app.isSuperAdmin && !_superAdminRoutes.contains(loc) && !loc.startsWith('${Routes.adminMasters}/')) return home;
     if (loc == Routes.adminCompanies && !app.isSuperAdmin) return home;
     if (loc == Routes.adminUsers && !app.canManageUsers) return home;
     if (loc == Routes.adminSoftware && !app.canManageCatalog) return home;
-    if (loc == Routes.adminMasters && !app.isSuperAdmin) return home;
+    if (loc.startsWith('${Routes.adminMasters}/') && !app.isSuperAdmin) return home;
     return null;
   },
   routes: [
@@ -114,7 +115,7 @@ final router = GoRouter(
         GoRoute(path: Routes.clients, builder: (_, _) => const ClientsScreen()),
         GoRoute(path: Routes.licenses, builder: (_, _) => const LicensesScreen()),
         GoRoute(path: Routes.adminSoftware, builder: (_, _) => const SoftwareAdminScreen()),
-        GoRoute(path: Routes.adminMasters, builder: (_, _) => const MastersScreen()),
+        GoRoute(path: '${Routes.adminMasters}/:table', builder: (_, s) => MastersScreen(key: ValueKey(s.pathParameters['table']), table: s.pathParameters['table']!)),
         GoRoute(path: Routes.domainSearch, builder: (_, _) => const DomainSearchApiScreen()),
         GoRoute(path: Routes.orderSsl, builder: (_, _) => const SslScreen()),
         GoRoute(path: Routes.purchasedSsl, builder: (_, _) => const PurchasedSslScreen()),

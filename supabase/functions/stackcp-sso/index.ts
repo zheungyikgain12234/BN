@@ -278,6 +278,42 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
       price: x.price,                                              // 20i's cost for the whole period
     })));
 
+  // What each SSL type includes ("$10,000 Warranty", ...): the panel's order-ssl page lists it in the page itself, as a
+  // "default-description" list per type (ssl_simple_checkbox, ssl_extended_checkbox, ssl_wildcard_checkbox) plus a tooltip. A page
+  // that cannot be read just leaves the app on its built-in text. Not a documented API, so everything is read defensively.
+  const sslInfo: Record<string, { summary: string; features: string[] }> = {};
+  try {
+    const html = await (await fetch(`${PANEL}/order-ssl`, { headers: { Cookie: cookieHeader(jar), Accept: "text/html" } })).text();
+    const classOf: Record<string, string> = { simple: "tucows-rapidssl", extended: "tucows-truebizid_ev", wildcard: "tucows-rapidssl_wildcard" };
+    const text = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+    for (const part of html.split(/id="ssl_(?=[a-z]+_checkbox")/).slice(1)) {
+      const type = part.match(/^([a-z]+)_checkbox"/)?.[1] ?? "";
+      const code = classOf[type];
+      if (!code) continue;
+      const list = part.match(/class="default-description"[\s\S]*?<\/ul>/)?.[0] ?? "";
+      const features = [...list.matchAll(/<li>[\s\S]*?<span>([\s\S]*?)<\/span>\s*<\/li>/g)].map((m) => text(m[1])).filter((s) => s);
+      const summary = text(part.match(/data-bs-title="([^"]*)"/)?.[1] ?? "");
+      if (features.length) sslInfo[code] = { summary, features };
+    }
+  } catch (e) {
+    console.log("stackcp-sso could not read the order-ssl page", String(e).slice(0, 200));
+  }
+  // The order page also asks /a/catalogue/productDescription for descriptions the reseller has set; when one exists for a type it
+  // replaces the default list above ({ "tls_certificate:tucows-rapidssl": [{ content: "<ul><li>..." }] }). Often there are none.
+  try {
+    const custom = await get("/a/catalogue/productDescription");
+    for (const [key, list] of Object.entries(custom ?? {})) {
+      const code = key.replace(/^tls_certificate:/i, "");
+      const html = (Array.isArray(list) ? (list as any[])[0]?.content : null) as string | null;
+      if (key === code || typeof html !== "string") continue;
+      const clean = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+      const items = [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map((m) => clean(m[1])).filter((s) => s);
+      const lines = items.length ? items : html.split(/<br\s*\/?>|<\/p>|\n/i).map(clean).filter((s) => s);
+      if (lines.length) sslInfo[code] = { summary: sslInfo[code]?.summary ?? "", features: lines };
+    }
+  } catch (e) {
+    console.log("stackcp-sso: no custom SSL descriptions", String(e).slice(0, 200));
+  }
   // VPS add-ons: cPanel licences, snapshot backup and extra disks (vps_addon:cpanelpro, vps_addon:disk100GB ...).
   // spec is the 20i productSpec ("vps_addon-cpanelpro"), which is what addVpsAddon wants.
   const vpsAddons = (Array.isArray(products) ? products : [])
@@ -364,7 +400,7 @@ async function fetchVpsCatalogue(jar: Map<string, string>) {
     console.error("stackcp-sso: could not read the VPS locations", String(e));
   }
   console.log("stackcp-sso catalogue", plans.length, "vps plans,", os.length, "operating systems,", sslPlans.length, "ssl certificates,", vpsAddons.length, "vps add-ons,", domains.length, "domains");
-  return { vpsPlans: plans, vpsOs: os, vpsLocations, sslPlans, vpsAddons, domains, hostingPlans, catalogueCodes };
+  return { vpsPlans: plans, vpsOs: os, vpsLocations, sslPlans, sslInfo, vpsAddons, domains, hostingPlans, catalogueCodes };
 }
 
 Deno.serve(async (req) => {

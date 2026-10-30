@@ -8,6 +8,7 @@ import '../../core/widgets.dart';
 import '../../data/catalog_repository.dart';
 import '../../data/masters.dart';
 import '../hosting/hosting_screen.dart';
+import '../ssl/ssl_screen.dart';
 
 /// What is inside a hosting package (limits and tick/cross features), in its own window.
 Future<void> _showPackageDetails(BuildContext context, String title, Map<String, dynamic> limits) => showDialog<void>(
@@ -26,26 +27,22 @@ Future<void> _showPackageDetails(BuildContext context, String title, Map<String,
       ),
     );
 
-/// Admin: manage the lists the software form picks from (categories, tags, pricing models).
+/// Admin: manage one master list (chosen by its table name in the address), one page per list.
 class MastersScreen extends StatelessWidget {
-  const MastersScreen({super.key});
+  const MastersScreen({super.key, required this.table});
+  final String table;
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: masterDefs.length,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('Master Data', style: T.headlineLg),
-          const SizedBox(height: 4),
-          Text('The lists used when adding software, and domain selling prices.', style: T.bodyMd.copyWith(color: C.secondary)),
-          const SizedBox(height: 8),
-          TabBar(isScrollable: true, tabAlignment: TabAlignment.start, tabs: [for (final d in masterDefs) Tab(text: d.title)]),
-          const SizedBox(height: 12),
-          Expanded(child: TabBarView(children: [for (final d in masterDefs) _MasterTab(def: d)])),
-        ]),
-      ),
+    final def = masterDefs.where((d) => d.table == table).firstOrNull;
+    if (def == null) return const Center(child: Text('Unknown list.'));
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(def.menu, style: T.headlineLg),
+        const SizedBox(height: 12),
+        Expanded(child: _MasterTab(key: ValueKey(def.table), def: def)),
+      ]),
     );
   }
 }
@@ -53,7 +50,7 @@ class MastersScreen extends StatelessWidget {
 bool _isNumber(MasterField f) => f.kind == MasterFieldKind.integer || f.kind == MasterFieldKind.decimal || f.kind == MasterFieldKind.money || f.kind == MasterFieldKind.percent;
 
 class _MasterTab extends StatefulWidget {
-  const _MasterTab({required this.def});
+  const _MasterTab({super.key, required this.def});
   final MasterDef def;
 
   @override
@@ -200,6 +197,12 @@ class _MasterTabState extends State<_MasterTab> with AutomaticKeepAliveClientMix
             icon: const Icon(Icons.info_outline, size: 18),
             onPressed: () => _showPackageDetails(context, '${r['plan_name']}', Map<String, dynamic>.from((r['limits'] as Map?) ?? const {})),
           ),
+        if (def.table == 'ssl_plan_prices')
+          IconButton(
+            tooltip: 'View what is included in this certificate',
+            icon: const Icon(Icons.info_outline, size: 18),
+            onPressed: () => _showSslDetails(context, '${r['plan_name']}', '${r['class_code']}', features: [for (final f in (r['features'] as List? ?? const [])) '$f'], summary: '${r['summary'] ?? ''}'),
+          ),
         if (def.table == 'vps_plan_prices')
           IconButton(
             tooltip: 'View what is inside this VPS',
@@ -247,6 +250,8 @@ class _MasterDialogState extends State<_MasterDialog> {
   ({int? cores, int? ramMb, int? diskGb})? _specs; // VPS plan specs from 20i, set when a plan is picked
   List<String>? _features; // hosting plan contents from 20i, set when a plan is picked
   Map<String, dynamic>? _limits; // hosting plan full limits and feature flags from 20i
+  List<String>? _sslFeatures; // what the SSL certificate includes, from 20i's order page, set when one is picked
+  String _sslSummary = '';
 
   /// Domain prices: choose the extension from 20i's own list, with a search box.
   Future<void> _pickTld() async {
@@ -342,16 +347,32 @@ class _MasterDialogState extends State<_MasterDialog> {
   /// SSL: choose a certificate and billing period from the panel shop's list (the class code and market price come with it).
   Future<void> _pickSsl() async {
     try {
-      final plans = await withLoader(context, sslCartRepo.panelCatalogue, message: 'Loading certificates...');
+      final all = await withLoader(context, sslCartRepo.panelCatalogue, message: 'Loading certificates...');
       if (!mounted) return;
-      final chosen = await showDialog<({String code, String label, int months, double price})>(
+      // SSL is sold per year: one entry per certificate, priced as a year (from its shortest billing period).
+      final byCode = <String, ({String code, String label, int months, double price, List<String> features, String summary})>{};
+      for (final p in all) {
+        final old = byCode[p.code];
+        if (old != null && old.months <= p.months) continue;
+        byCode[p.code] = (code: p.code, label: p.label, months: p.months, price: p.price, features: p.features, summary: p.summary);
+      }
+      final plans = [
+        for (final p in byCode.values) (code: p.code, label: p.label, months: 12, price: (p.price / p.months * 12 * 100).round() / 100, features: p.features, summary: p.summary),
+      ];
+      final chosen = await showDialog<({String code, String label, int months, double price, List<String> features, String summary})>(
         context: context,
         builder: (_) => _PickerDialog(
           title: 'SSL certificates',
           emptyText: 'Nothing to show.',
           items: [
             for (final p in plans)
-              _PickerItem(value: p, title: p.label, subtitle: 'Billed every ${p.months} ${p.months == 1 ? 'month' : 'months'}  ·  Certificate ID ${p.code}', price: 'Market price: ${money(p.price)} per period'),
+              _PickerItem(
+                value: p,
+                title: p.label,
+                subtitle: 'Billed every year  ·  Certificate ID ${p.code}',
+                price: 'Market price: ${money(p.price)} per year',
+                onInfo: (ctx) => _showSslDetails(ctx, p.label, p.code, features: p.features, summary: p.summary),
+              ),
           ],
         ),
       );
@@ -361,6 +382,8 @@ class _MasterDialogState extends State<_MasterDialog> {
         _text['plan_name']!.text = chosen.label;
         _text['months']!.text = '${chosen.months}';
         _cost = chosen.price;
+        _sslFeatures = chosen.features;
+        _sslSummary = chosen.summary;
       });
     } catch (e) {
       if (mounted) showError(context, e);
@@ -492,6 +515,10 @@ class _MasterDialogState extends State<_MasterDialog> {
       if (widget.def.table == 'hosting_plan_prices' && _features != null) {
         values['features'] = _features;
         values['limits'] = _limits ?? const {};
+      }
+      if (widget.def.table == 'ssl_plan_prices' && _sslFeatures != null) {
+        values['features'] = _sslFeatures;
+        values['summary'] = _sslSummary;
       }
       if (widget.def.table == 'vps_plan_prices' && _specs != null) {
         values['cpu_cores'] = _specs!.cores;
@@ -711,6 +738,23 @@ class _TldPickerDialogState extends State<_TldPickerDialog> {
     );
   }
 }
+
+/// What an SSL certificate type includes (warranty, validation level, ...), in its own window.
+Future<void> _showSslDetails(BuildContext context, String title, String classCode, {List<String> features = const [], String summary = ''}) => showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              title: Text(title, style: T.headlineSm),
+              trailing: IconButton(tooltip: 'Close', icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+            ),
+            Flexible(child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), child: SslPackageDetails(classCode: classCode, features: features, summary: summary))),
+          ]),
+        ),
+      ),
+    );
 
 /// One row in [_PickerDialog]: what is shown, and the value handed back when it is selected.
 class _PickerItem<V> {

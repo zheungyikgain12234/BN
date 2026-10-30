@@ -73,7 +73,7 @@ class _SoftwareAdminScreenState extends State<SoftwareAdminScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Manage software', style: T.headlineLg),
+        Text('Manage Software', style: T.headlineLg),
         const SizedBox(height: 16),
         Expanded(
           child: _error != null
